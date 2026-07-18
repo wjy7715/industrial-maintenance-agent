@@ -1,0 +1,21 @@
+{
+  "source_url": "https://cdn.uci-ics-mlr-prod.aws.uci.edu/601/ai4i%2B2020%2Bpredictive%2Bmaintenance%2Bdataset.zip",
+  "source_page": "https://archive.ics.uci.edu/dataset/601/ai4i",
+  "license": "CC BY 4.0",
+  "file": "ai4i2020.csv",
+  "sha256": "dc6630cd9b1f0f853922fad78a1b6436570d3f1ec863f1dd5c4340ac56bc8a8e",
+  "profile": {
+    "rows": 10000,
+    "machine_failures": 339,
+    "failure_rate": 0.0339,
+    "failure_modes": {
+      "TWF": 46,
+      "HDF": 115,
+      "PWF": 95,
+      "OSF": 98,
+      "RNF": 19
+    },
+    "source": "UCI AI4I 2020",
+    "license": "CC BY 4.0"
+  }
+}

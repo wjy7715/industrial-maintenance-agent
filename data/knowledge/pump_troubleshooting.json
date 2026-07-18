@@ -1,0 +1,74 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "notice": "公开资料的结构化释义；执行前必须核对具体型号手册。"
+  },
+  "entries": [
+    {
+      "knowledge_id": "KB-PUMP-NO-FLOW",
+      "equipment_type": "centrifugal_pump",
+      "match_terms": {"不出水": 6, "不出液": 6, "没有流量": 5, "无流量": 5, "无法输送": 5},
+      "summary": "无液体输出时，常见排查方向包括灌泵状态、吸入管路、叶轮堵塞和旋转方向。",
+      "possible_causes": ["泵未正确灌注", "吸入管路或叶轮堵塞", "旋转方向错误"],
+      "inspection_steps": ["确认泵体和吸入管路是否充满液体", "隔离设备后检查吸入管路及叶轮堵塞", "核对设备箭头标识与实际旋转方向"],
+      "corrective_actions": ["按对应型号手册重新灌泵", "由合格人员清理确认的堵塞物", "由电气专业人员纠正确认的旋转方向问题"],
+      "safety_warnings": ["检查叶轮或旋转方向前必须断电并防止意外启动。"],
+      "source": {"name": "Goulds Pump IOM Manual", "url": "https://www3.aps.anl.gov/APS_Engineering_Support_Division/Mechanical_Operations_and_Maintenance/Subsystems/ASD-ME-Group_files/data/RFWater/Maintenance/Pumps/GouldsPumpsO-M.pdf", "location": "Troubleshooting, PDF page 51"}
+    },
+    {
+      "knowledge_id": "KB-PUMP-LOW-FLOW",
+      "equipment_type": "centrifugal_pump",
+      "match_terms": {"压力下降": 6, "压力不足": 6, "流量下降": 6, "流量不足": 6, "扬程不足": 5},
+      "summary": "流量或扬程不足可能与吸入侧泄漏/阻塞、叶轮局部堵塞或磨损、吸入条件不足有关。",
+      "possible_causes": ["吸入侧存在泄漏或阻塞", "叶轮局部堵塞或磨损", "吸入压头不足"],
+      "inspection_steps": ["检查吸入阀开度及管路阻塞", "检查密封和垫片泄漏", "隔离卸压后检查叶轮状态"],
+      "corrective_actions": ["修复已确认的泄漏或阻塞", "清理叶轮；磨损时由专业人员评估更换", "按型号手册核对并纠正吸入条件"],
+      "safety_warnings": ["拆检泵体前必须隔离介质并确认系统卸压。"],
+      "source": {"name": "Goulds Pump IOM Manual", "url": "https://www3.aps.anl.gov/APS_Engineering_Support_Division/Mechanical_Operations_and_Maintenance/Subsystems/ASD-ME-Group_files/data/RFWater/Maintenance/Pumps/GouldsPumpsO-M.pdf", "location": "Troubleshooting, PDF page 51"}
+    },
+    {
+      "knowledge_id": "KB-PUMP-VIBRATION",
+      "equipment_type": "centrifugal_pump",
+      "match_terms": {"振动": 6, "抖动": 5, "噪声": 5, "异响": 5, "晃动": 4},
+      "summary": "异常振动或噪声应检查轴系对中、叶轮平衡、基础刚度、轴承和汽蚀。",
+      "possible_causes": ["泵与驱动机轴系对中不良", "叶轮堵塞、损坏或失衡", "轴承磨损或泵发生汽蚀"],
+      "inspection_steps": ["记录振动、噪声和工况趋势", "停机隔离后检查轴系对中和基础紧固", "检查吸入条件、轴承与叶轮状态"],
+      "corrective_actions": ["由合格人员重新进行轴系对中", "清理或评估更换受损叶轮、轴承", "定位并纠正导致汽蚀的系统问题"],
+      "safety_warnings": ["振动快速增加时应停止继续运行并升级处理。"],
+      "source": {"name": "Goulds Pump IOM Manual", "url": "https://www3.aps.anl.gov/APS_Engineering_Support_Division/Mechanical_Operations_and_Maintenance/Subsystems/ASD-ME-Group_files/data/RFWater/Maintenance/Pumps/GouldsPumpsO-M.pdf", "location": "Troubleshooting, PDF page 51"}
+    },
+    {
+      "knowledge_id": "KB-PUMP-HOT-BEARING",
+      "equipment_type": "centrifugal_pump",
+      "match_terms": {"轴承过热": 7, "轴承温度": 6, "温度过高": 5, "持续升温": 5, "发热": 4},
+      "summary": "轴承温度异常时应核对轴系对中、润滑状态和冷却条件。",
+      "possible_causes": ["轴系对中不良", "润滑剂类型或油位不正确", "冷却系统异常"],
+      "inspection_steps": ["检查温度趋势和异常噪声", "停机后核对润滑剂适用性与油位", "检查冷却系统状态"],
+      "corrective_actions": ["纠正已确认的对中问题", "按型号手册调整润滑状态", "修复已确认的冷却故障"],
+      "safety_warnings": ["轴承持续升温可能导致设备损坏，不得仅依据 Agent 决定继续运行。"],
+      "source": {"name": "Goulds Pump IOM Manual", "url": "https://www3.aps.anl.gov/APS_Engineering_Support_Division/Mechanical_Operations_and_Maintenance/Subsystems/ASD-ME-Group_files/data/RFWater/Maintenance/Pumps/GouldsPumpsO-M.pdf", "location": "Troubleshooting, PDF page 51"}
+    },
+    {
+      "knowledge_id": "KB-PUMP-SEAL-LEAK",
+      "equipment_type": "centrifugal_pump",
+      "match_terms": {"泄漏": 6, "漏液": 6, "轴封漏": 7, "密封漏": 7, "滴液": 5},
+      "summary": "轴封泄漏可能与机械密封磨损、轴套损伤、润滑冷却不足或介质不相容有关。",
+      "possible_causes": ["机械密封部件磨损", "轴套表面损伤", "密封润滑或冷却不足"],
+      "inspection_steps": ["确认泄漏位置、介质和变化趋势", "停机隔离卸压后检查密封与轴套", "核对介质温度与密封材料兼容性"],
+      "corrective_actions": ["由专业人员更换确认磨损的密封部件", "评估修复或更换损伤轴套", "恢复符合手册要求的润滑与冷却条件"],
+      "safety_warnings": ["未知、腐蚀性、易燃或高温介质泄漏时应隔离现场并按应急程序处理。"],
+      "source": {"name": "Goulds Pump IOM Manual", "url": "https://www3.aps.anl.gov/APS_Engineering_Support_Division/Mechanical_Operations_and_Maintenance/Subsystems/ASD-ME-Group_files/data/RFWater/Maintenance/Pumps/GouldsPumpsO-M.pdf", "location": "Troubleshooting, PDF page 51"}
+    },
+    {
+      "knowledge_id": "KB-PUMP-OVERLOAD",
+      "equipment_type": "centrifugal_pump",
+      "match_terms": {"电机过载": 7, "过载": 5, "功率过高": 6, "电流过大": 6, "跳闸": 5, "耗电增加": 5},
+      "summary": "驱动功率异常可能与工况偏离、介质性质变化、填料过紧或旋转部件卡滞有关。",
+      "possible_causes": ["泵运行点偏离额定工况", "介质比重或黏度与设计不符", "填料过紧或旋转部件卡滞"],
+      "inspection_steps": ["核对流量、扬程和电机电流趋势", "核对实际介质性质与设计条件", "停机隔离后检查旋转部件间隙和填料状态"],
+      "corrective_actions": ["由工程人员调整到合适运行工况", "按设计条件重新核对设备适用性", "由合格人员纠正确认的机械卡滞或填料问题"],
+      "safety_warnings": ["电气检查必须由具备资质的人员执行。"],
+      "source": {"name": "Goulds Pump IOM Manual", "url": "https://www3.aps.anl.gov/APS_Engineering_Support_Division/Mechanical_Operations_and_Maintenance/Subsystems/ASD-ME-Group_files/data/RFWater/Maintenance/Pumps/GouldsPumpsO-M.pdf", "location": "Troubleshooting, PDF page 51"}
+    }
+  ]
+}

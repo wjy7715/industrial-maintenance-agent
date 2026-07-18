@@ -1,0 +1,32 @@
+{
+  "metadata": {
+    "kind": "synthetic_demo",
+    "notice": "由项目构造用于软件测试，不代表真实工业现场。"
+  },
+  "equipment": [
+    {
+      "equipment_id": "PUMP-001",
+      "equipment_type": "centrifugal_pump",
+      "captured_at": "2026-07-18T09:00:00+08:00",
+      "latest_telemetry": {"pressure_bar": 1.8, "vibration_mm_s": 8.6, "temperature_c": 76.0, "rotation_rpm": 1450},
+      "active_errors": ["VIBRATION_HIGH", "DISCHARGE_PRESSURE_LOW"],
+      "maintenance_history": [{"date": "2026-06-20", "action": "检查联轴器并补充润滑", "result": "完成"}]
+    },
+    {
+      "equipment_id": "PUMP-002",
+      "equipment_type": "centrifugal_pump",
+      "captured_at": "2026-07-18T09:00:00+08:00",
+      "latest_telemetry": {"pressure_bar": 3.2, "vibration_mm_s": 2.1, "temperature_c": 48.0, "rotation_rpm": 1450},
+      "active_errors": [],
+      "maintenance_history": []
+    },
+    {
+      "equipment_id": "PUMP-003",
+      "equipment_type": "centrifugal_pump",
+      "captured_at": "2026-07-18T09:00:00+08:00",
+      "latest_telemetry": {"pressure_bar": 2.7, "vibration_mm_s": 5.2, "temperature_c": 84.0, "rotation_rpm": 1450},
+      "active_errors": ["BEARING_TEMPERATURE_HIGH"],
+      "maintenance_history": [{"date": "2026-05-15", "action": "更换轴承", "result": "完成"}]
+    }
+  ]
+}
