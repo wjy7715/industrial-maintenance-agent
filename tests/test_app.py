@@ -24,4 +24,12 @@ class StreamlitAppTests(unittest.TestCase):
         metrics = {item.label: item.value for item in app.metric}
         self.assertEqual("草稿", metrics["结果状态"])
         self.assertEqual("必须", metrics["人工确认"])
+        self.assertTrue(metrics["会话"])
         self.assertEqual(1, len(app.dataframe))
+        self.assertEqual("评价", app.radio[0].label)
+        self.assertEqual("说明（可选）", app.text_input[0].label)
+        app.radio[0].set_value("部分有效")
+        app.text_input[0].input("需要补充趋势")
+        app.button[1].click().run()
+        self.assertEqual(0, len(app.exception))
+        self.assertTrue(any("反馈已记录" in item.value for item in app.success))

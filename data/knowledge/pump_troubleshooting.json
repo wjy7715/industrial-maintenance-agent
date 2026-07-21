@@ -1,6 +1,9 @@
 {
   "metadata": {
     "version": "1.0.0",
+    "default_status": "active",
+    "applicable_models": ["DEMO-PUMP-A", "DEMO-PUMP-B"],
+    "reviewed_at": "2026-07-18",
     "notice": "公开资料的结构化释义；执行前必须核对具体型号手册。"
   },
   "entries": [

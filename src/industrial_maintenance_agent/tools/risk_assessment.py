@@ -5,6 +5,7 @@ from typing import Any
 
 class RiskAssessmentTool:
     name = "assess_operating_risk"
+    version = "1.1"
 
     PUMP_THRESHOLDS = {
         "vibration_mm_s": (4.5, 7.1),
@@ -31,4 +32,11 @@ class RiskAssessmentTool:
             "level": level,
             "signals": signals,
             "notice": "阈值仅用于原型演示，不能替代具体型号和现场标准",
+        }
+
+    def result_metadata(self, data: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "source": {"kind": "deterministic_rule", "name": "项目演示阈值规则"},
+            "quality": "good" if data["level"] != "unknown" else "unknown",
+            "warnings": [data["notice"]],
         }

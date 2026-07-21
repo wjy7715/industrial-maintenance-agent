@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -10,8 +11,12 @@ from unittest.mock import patch
 from industrial_maintenance_agent import DiagnosisRequest, MaintenanceOrchestrator
 from industrial_maintenance_agent.data_import import profile_ai4i
 from industrial_maintenance_agent.evaluation import run_retrieval_evaluation
-from industrial_maintenance_agent.repositories import EquipmentRepository, KnowledgeRepository
-from industrial_maintenance_agent.tools import RiskAssessmentTool
+from industrial_maintenance_agent.repositories import (
+    EquipmentRepository,
+    KnowledgeRepository,
+    SessionRepository,
+)
+from industrial_maintenance_agent.tools import RiskAssessmentTool, execute_tool
 from industrial_maintenance_agent.adapters import HermesNarrator
 
 
@@ -42,6 +47,30 @@ class RepositoryTests(unittest.TestCase):
         repository = KnowledgeRepository(ROOT / "data/knowledge/pump_troubleshooting.json")
         self.assertEqual([], repository.search("centrifugal_pump", "显示器颜色变化"))
 
+    def test_inactive_and_wrong_model_knowledge_is_filtered(self) -> None:
+        payload = {
+            "metadata": {"version": "1.0", "default_status": "active"},
+            "entries": [
+                {
+                    "knowledge_id": "INACTIVE",
+                    "equipment_type": "centrifugal_pump",
+                    "status": "retired",
+                    "match_terms": {"振动": 5},
+                },
+                {
+                    "knowledge_id": "MODEL-B",
+                    "equipment_type": "centrifugal_pump",
+                    "applicable_models": ["MODEL-B"],
+                    "match_terms": {"振动": 5},
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "knowledge.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            repository = KnowledgeRepository(path)
+            self.assertEqual([], repository.search("centrifugal_pump", "振动", equipment_model="MODEL-A"))
+
 
 class RiskTests(unittest.TestCase):
     def test_critical_vibration(self) -> None:
@@ -55,19 +84,39 @@ class RiskTests(unittest.TestCase):
         self.assertEqual("low", result["level"])
 
 
+class ToolContractTests(unittest.TestCase):
+    def test_failure_is_structured_instead_of_fabricated(self) -> None:
+        class BrokenTool:
+            name = "broken"
+            version = "9.0"
+
+            def run(self) -> object:
+                raise TimeoutError("upstream timeout")
+
+        result = execute_tool(BrokenTool())
+        self.assertEqual("failed", result.status)
+        self.assertIsNone(result.data)
+        self.assertIn("TimeoutError", result.error)
+        self.assertEqual("9.0", result.tool_version)
+
+
 class OrchestratorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.agent = MaintenanceOrchestrator.from_project(ROOT)
 
     def test_multitool_plan_is_cited_draft(self) -> None:
-        plan = self.agent.diagnose(DiagnosisRequest("PUMP-001", ("振动且压力下降",)))
+        plan = self.agent.diagnose(DiagnosisRequest("PUMP-002", ("振动且压力下降",)))
         self.assertEqual("draft", plan.status)
         self.assertTrue(plan.requires_human_confirmation)
         self.assertEqual(4, len(plan.tool_trace))
-        self.assertGreaterEqual(len(plan.evidence), 4)
+        self.assertGreaterEqual(len(plan.evidence), 3)
         self.assertTrue(all(item.source_name for item in plan.evidence))
         self.assertGreaterEqual(len(plan.corrective_actions), 6)
         self.assertTrue(any(item.kind == "maintenance_knowledge" for item in plan.evidence))
+        self.assertTrue(plan.request_id)
+        self.assertTrue(plan.session_id)
+        self.assertTrue(plan.facts)
+        self.assertTrue(all(item.version for item in plan.tool_trace))
 
     def test_unknown_equipment_explicit(self) -> None:
         with self.assertRaisesRegex(LookupError, "未找到设备"):
@@ -82,6 +131,72 @@ class OrchestratorTests(unittest.TestCase):
         plan = self.agent.diagnose(DiagnosisRequest("PUMP-003", ("轴承温度持续升高",)))
         self.assertEqual("critical", plan.risk_level)
         self.assertTrue(any("专业人员" in item for item in plan.safety_warnings))
+        self.assertEqual([], plan.corrective_actions)
+        self.assertTrue(any("隐藏具体纠正动作" in item for item in plan.limitations))
+
+    def test_conflicting_alarm_and_telemetry_is_exposed(self) -> None:
+        base = self.agent.telemetry.repository.get("PUMP-001")
+        original = base["latest_telemetry"]["vibration_mm_s"]
+        base["latest_telemetry"]["vibration_mm_s"] = 2.0
+        try:
+            plan = self.agent.diagnose(DiagnosisRequest("PUMP-001", ("振动",)))
+        finally:
+            base["latest_telemetry"]["vibration_mm_s"] = original
+        self.assertTrue(any("告警显示振动过高" in item for item in plan.conflicts))
+
+    def test_ambiguous_symptom_requests_clarification(self) -> None:
+        plan = self.agent.diagnose(DiagnosisRequest("PUMP-001", ("异常",)))
+        self.assertEqual("awaiting_clarification", plan.status)
+        self.assertLessEqual(len(plan.clarification_questions), 3)
+        self.assertEqual([], plan.corrective_actions)
+
+    def test_history_failure_degrades_without_fabricating_history(self) -> None:
+        class BrokenHistory:
+            name = "query_fault_history"
+            version = "test"
+
+            def run(self, equipment_id: str) -> object:
+                raise TimeoutError(equipment_id)
+
+        agent = MaintenanceOrchestrator(
+            self.agent.telemetry,
+            BrokenHistory(),
+            self.agent.knowledge,
+            self.agent.risk,
+        )
+        plan = agent.diagnose(DiagnosisRequest("PUMP-001", ("振动",)))
+        history_trace = next(item for item in plan.tool_trace if item.tool == "query_fault_history")
+        self.assertEqual("failed", history_trace.status)
+        self.assertTrue(any("历史查询失败" in item for item in plan.unknowns))
+
+
+class SessionRepositoryTests(unittest.TestCase):
+    def test_session_and_feedback_are_audited(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sessions = SessionRepository(Path(directory) / "audit.db")
+            base = MaintenanceOrchestrator.from_project(ROOT)
+            agent = MaintenanceOrchestrator(
+                base.telemetry, base.history, base.knowledge, base.risk, sessions=sessions
+            )
+            request = DiagnosisRequest("PUMP-002", ("压力下降",))
+            plan = agent.diagnose(request)
+            recent = sessions.recent_sessions()
+            self.assertEqual(plan.session_id, recent[0]["session_id"])
+            feedback_id = sessions.add_feedback(plan.session_id, "partial", "需补充趋势")
+            self.assertGreater(feedback_id, 0)
+            feedback = sessions.feedback_for_session(plan.session_id)
+            self.assertEqual("partial", feedback[0]["rating"])
+            detail = sessions.get_session(plan.session_id)
+            self.assertEqual(request.request_id, detail["request_id"])
+            self.assertEqual("partial", detail["feedback"][0]["rating"])
+
+    def test_feedback_rejects_unknown_session_and_rating(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sessions = SessionRepository(Path(directory) / "audit.db")
+            with self.assertRaises(ValueError):
+                sessions.add_feedback("missing", "liked")
+            with self.assertRaises(LookupError):
+                sessions.add_feedback("missing", "effective")
 
 
 class EvaluationTests(unittest.TestCase):

@@ -10,7 +10,9 @@
 
 ## 数据流
 
-`DiagnosisRequest` 进入 `MaintenanceOrchestrator` 后依次获得遥测、历史、风险和知识结果。总控将这些结果汇总成 `MaintenancePlan`，随后由 `SafetyPolicy` 添加不可绕过的警告。CLI、网页和 Hermes 只消费同一个结构化结果。
+`DiagnosisRequest` 进入 `MaintenanceOrchestrator` 后，通过统一 `ToolResult` 契约获得遥测、历史、风险和知识结果。每个结果包含 success/empty/failed、版本、耗时、质量、来源与错误。总控将事实、候选原因、未知项和冲突汇总成 `MaintenancePlan`，随后由 `SafetyPolicy` 添加不可绕过的警告。会话写入本地 SQLite 审计库，CLI、网页和 Hermes 只消费同一个结构化结果。
+
+任一非关键工具失败时，系统保留失败轨迹并降级输出，不把缺失数据伪装成成功。遥测入口失败或设备不存在时停止诊断。知识检索只返回 active 且适用于当前设备型号的内容。
 
 ## 为什么不是简单 RAG
 
@@ -19,3 +21,7 @@
 - 输出包含完整工具轨迹。
 - 高风险结果强制升级人工处理。
 - 无知识命中时返回空措施，而不是让模型补写。
+
+## 本地持久化
+
+`data/runtime/assistant.db` 保存诊断会话和人工反馈，目录不提交到 Git。反馈不会自动发布知识或改变规则。生产试点前需替换为企业数据库、统一身份认证、角色权限和正式备份策略。

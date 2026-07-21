@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from ..repositories import EquipmentRepository
@@ -7,6 +8,8 @@ from ..repositories import EquipmentRepository
 
 class TelemetryTool:
     name = "query_telemetry"
+    version = "1.1"
+    stale_after_hours = 24
 
     def __init__(self, repository: EquipmentRepository) -> None:
         self.repository = repository
@@ -17,6 +20,20 @@ class TelemetryTool:
             raise LookupError(f"未找到设备：{equipment_id}")
         return {
             "equipment_type": record["equipment_type"],
+            "equipment_model": record.get("equipment_model"),
             "captured_at": record["captured_at"],
             "values": record["latest_telemetry"],
+        }
+
+    def result_metadata(self, data: dict[str, Any]) -> dict[str, Any]:
+        captured_at = datetime.fromisoformat(data["captured_at"])
+        if captured_at.tzinfo is None:
+            captured_at = captured_at.replace(tzinfo=timezone.utc)
+        age_hours = (datetime.now(timezone.utc) - captured_at.astimezone(timezone.utc)).total_seconds() / 3600
+        stale = age_hours > self.stale_after_hours
+        return {
+            "source": {"kind": "synthetic_demo", "name": "项目仿真设备数据"},
+            "observed_at": data["captured_at"],
+            "quality": "stale" if stale else "good",
+            "warnings": [f"遥测数据已超过 {self.stale_after_hours} 小时"] if stale else [],
         }

@@ -8,6 +8,7 @@ from .agents import MaintenanceOrchestrator
 from .data_import import profile_ai4i
 from .domain import DiagnosisRequest
 from .evaluation import run_retrieval_evaluation
+from .repositories import SessionRepository
 
 
 def parser() -> argparse.ArgumentParser:
@@ -19,6 +20,18 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("evaluate")
     profile = commands.add_parser("profile-ai4i")
     profile.add_argument("--file", default="data/raw/ai4i/ai4i2020.csv")
+    sessions = commands.add_parser("sessions", help="查看最近本地审计会话")
+    sessions.add_argument("--limit", type=int, default=20)
+    session = commands.add_parser("session", help="查看单个诊断会话")
+    session.add_argument("--session-id", required=True)
+    feedback = commands.add_parser("feedback", help="为已审计会话记录人工反馈")
+    feedback.add_argument("--session-id", required=True)
+    feedback.add_argument(
+        "--rating",
+        required=True,
+        choices=("effective", "partial", "ineffective", "dangerous"),
+    )
+    feedback.add_argument("--comment", default="")
     return root
 
 
@@ -32,11 +45,22 @@ def main() -> None:
         result = plan.to_dict()
     elif args.command == "evaluate":
         result = run_retrieval_evaluation(project).to_dict()
-    else:
+    elif args.command == "profile-ai4i":
         path = Path(args.file)
         if not path.is_absolute():
             path = project / path
         result = profile_ai4i(path)
+    else:
+        sessions = SessionRepository(project / "data" / "runtime" / "assistant.db")
+        if args.command == "sessions":
+            result = sessions.recent_sessions(args.limit)
+        elif args.command == "session":
+            result = sessions.get_session(args.session_id)
+            if result is None:
+                raise SystemExit(f"未找到诊断会话：{args.session_id}")
+        else:
+            feedback_id = sessions.add_feedback(args.session_id, args.rating, args.comment)
+            result = {"feedback_id": feedback_id, "session_id": args.session_id, "status": "recorded"}
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

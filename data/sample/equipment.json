@@ -7,6 +7,7 @@
     {
       "equipment_id": "PUMP-001",
       "equipment_type": "centrifugal_pump",
+      "equipment_model": "DEMO-PUMP-A",
       "captured_at": "2026-07-18T09:00:00+08:00",
       "latest_telemetry": {"pressure_bar": 1.8, "vibration_mm_s": 8.6, "temperature_c": 76.0, "rotation_rpm": 1450},
       "active_errors": ["VIBRATION_HIGH", "DISCHARGE_PRESSURE_LOW"],
@@ -15,6 +16,7 @@
     {
       "equipment_id": "PUMP-002",
       "equipment_type": "centrifugal_pump",
+      "equipment_model": "DEMO-PUMP-A",
       "captured_at": "2026-07-18T09:00:00+08:00",
       "latest_telemetry": {"pressure_bar": 3.2, "vibration_mm_s": 2.1, "temperature_c": 48.0, "rotation_rpm": 1450},
       "active_errors": [],
@@ -23,6 +25,7 @@
     {
       "equipment_id": "PUMP-003",
       "equipment_type": "centrifugal_pump",
+      "equipment_model": "DEMO-PUMP-B",
       "captured_at": "2026-07-18T09:00:00+08:00",
       "latest_telemetry": {"pressure_bar": 2.7, "vibration_mm_s": 5.2, "temperature_c": 84.0, "rotation_rpm": 1450},
       "active_errors": ["BEARING_TEMPERATURE_HIGH"],
