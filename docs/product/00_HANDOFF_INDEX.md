@@ -1,8 +1,8 @@
 # 工业运维 Agent 产品规划包｜交接索引
 
 > 选题：多工具调用工业运维 Agent：设备故障查询 + 维修方案自动生成
-> 文档状态：规划基线 v1.0（2026-07-20）
-> 当前阶段：前期论证与方案设计，本轮不涉及代码实现
+> 文档状态：规划基线 v1.1（2026-07-21）
+> 当前阶段：本地演示版增量开发；真实试点仍待数据与授权
 
 ## 文档导航
 
@@ -15,6 +15,12 @@
 | [05_DATA_AND_KNOWLEDGE_PLAN.md](05_DATA_AND_KNOWLEDGE_PLAN.md) | 数据、知识、授权与检索 | 数据、算法、领域专家 |
 | [06_EVALUATION_AND_SAFETY.md](06_EVALUATION_AND_SAFETY.md) | 怎样评测、安全上线门槛 | 测试、安全、领域专家 |
 | [07_DELIVERY_PLAN.md](07_DELIVERY_PLAN.md) | 阶段计划、职责与交接 | 项目经理、全体成员 |
+
+工程执行补充文档：
+
+- [../DEVELOPMENT_PROCESS.md](../DEVELOPMENT_PROCESS.md)：开发阶段门、完成定义和 Git/发布策略。
+- [../REQUIREMENTS_TRACEABILITY.md](../REQUIREMENTS_TRACEABILITY.md)：PRD 需求、实现证据和剩余缺口。
+- [../PRESENTATION_PLAN.md](../PRESENTATION_PLAN.md)：最终项目总结汇报 PPT 的内容与验收要求。
 
 ## 已确认基线
 
