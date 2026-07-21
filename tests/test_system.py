@@ -15,6 +15,7 @@ from industrial_maintenance_agent.evaluation import build_shadow_report, run_ret
 from industrial_maintenance_agent.repositories import (
     EquipmentRepository,
     KnowledgeRepository,
+    MaintenanceHistoryCsvRepository,
     SessionRepository,
     TelemetryCsvRepository,
 )
@@ -75,7 +76,8 @@ class RepositoryTests(unittest.TestCase):
 
 
 class TelemetryCsvRepositoryTests(unittest.TestCase):
-    def _payload(self, captured_at: str | None = None) -> bytes:
+    @staticmethod
+    def _payload(captured_at: str | None = None) -> bytes:
         captured_at = captured_at or datetime.now(timezone.utc).isoformat()
         return (
             "equipment_id,equipment_type,equipment_model,captured_at,pressure_bar,"
@@ -115,6 +117,71 @@ class TelemetryCsvRepositoryTests(unittest.TestCase):
         telemetry = next(item for item in plan.evidence if item.kind == "telemetry")
         self.assertIn("field-export.csv", telemetry.source_name)
         self.assertTrue(any("未独立核验" in item for item in plan.limitations))
+
+
+class MaintenanceHistoryCsvRepositoryTests(unittest.TestCase):
+    def _payload(self) -> bytes:
+        return (
+            "event_id,equipment_id,event_type,event_at,error_code,action,result,"
+            "confirmed_cause,verified_at\n"
+            "E1,FIELD-PUMP-01,alarm_open,2026-07-20T09:00:00+08:00,VIBRATION_HIGH,,,,\n"
+            "E2,FIELD-PUMP-01,maintenance_closed,2026-07-20T10:00:00+08:00,,"
+            "重新对中,振动恢复正常,联轴器偏差,2026-07-20T11:00:00+08:00\n"
+            "E3,FIELD-PUMP-01,alarm_close,2026-07-20T11:05:00+08:00,VIBRATION_HIGH,,,,\n"
+            "E4,FIELD-PUMP-01,alarm_open,2026-07-21T09:00:00+08:00,VIBRATION_HIGH,,,,\n"
+        ).encode("utf-8")
+
+    def test_event_log_builds_current_alarm_and_closed_maintenance(self) -> None:
+        repository = MaintenanceHistoryCsvRepository.from_bytes(self._payload(), "history.csv")
+        record = repository.get("FIELD-PUMP-01")
+        self.assertEqual(["VIBRATION_HIGH"], record["active_errors"])
+        self.assertEqual("振动恢复正常", record["maintenance_history"][0]["result"])
+        summary = repository.validation_summary()
+        self.assertEqual(1, summary["active_alarm_count"])
+        self.assertEqual(1, summary["closed_maintenance_count"])
+        self.assertFalse(summary["write_back_enabled"])
+
+    def test_duplicate_event_and_naive_timestamp_are_rejected(self) -> None:
+        duplicate = self._payload() + self._payload().split(b"\n", 1)[1]
+        with self.assertRaisesRegex(ValueError, "事件编号重复"):
+            MaintenanceHistoryCsvRepository.from_bytes(duplicate)
+        naive = self._payload().replace(
+            b"2026-07-20T09:00:00+08:00",
+            b"2026-07-20T09:00:00",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "必须包含时区"):
+            MaintenanceHistoryCsvRepository.from_bytes(naive)
+
+    def test_closed_maintenance_requires_result_and_verification(self) -> None:
+        invalid = (
+            "event_id,equipment_id,event_type,event_at,error_code,action,result,"
+            "confirmed_cause,verified_at\n"
+            "E1,P1,maintenance_closed,2026-07-20T10:00:00+08:00,,检查,,,\n"
+        ).encode("utf-8")
+        with self.assertRaisesRegex(ValueError, "result 为空"):
+            MaintenanceHistoryCsvRepository.from_bytes(invalid)
+        reversed_time = (
+            "event_id,equipment_id,event_type,event_at,error_code,action,result,"
+            "confirmed_cause,verified_at\n"
+            "E1,P1,maintenance_closed,2026-07-20T10:00:00+08:00,,检查,完成,,"
+            "2026-07-20T09:00:00+08:00\n"
+        ).encode("utf-8")
+        with self.assertRaisesRegex(ValueError, "早于维修事件时间"):
+            MaintenanceHistoryCsvRepository.from_bytes(reversed_time)
+
+    def test_orchestrator_uses_independent_history_source_as_evidence(self) -> None:
+        telemetry = TelemetryCsvRepository.from_bytes(
+            TelemetryCsvRepositoryTests._payload(), "telemetry.csv"
+        )
+        history = MaintenanceHistoryCsvRepository.from_bytes(self._payload(), "history.csv")
+        agent = MaintenanceOrchestrator.from_project(ROOT, equipment=telemetry, history=history)
+        plan = agent.diagnose(DiagnosisRequest("FIELD-PUMP-01", ("振动",)))
+        evidence = next(item for item in plan.evidence if item.kind == "maintenance_history")
+        self.assertIn("history.csv", evidence.source_name)
+        self.assertIn("确认原因=联轴器偏差", evidence.summary)
+        self.assertTrue(any("故障/维修数据源" in item for item in plan.facts))
+        self.assertTrue(any("维修闭环" in item and "未独立核验" in item for item in plan.limitations))
 
 
 class RiskTests(unittest.TestCase):

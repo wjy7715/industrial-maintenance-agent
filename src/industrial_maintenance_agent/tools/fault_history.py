@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..repositories import EquipmentDataSource
+from ..repositories import HistoryDataSource
 
 
 class FaultHistoryTool:
     name = "query_fault_history"
-    version = "1.2"
+    version = "1.3"
 
-    def __init__(self, repository: EquipmentDataSource) -> None:
+    def __init__(self, repository: HistoryDataSource) -> None:
         self.repository = repository
 
     def run(self, equipment_id: str) -> dict[str, Any]:

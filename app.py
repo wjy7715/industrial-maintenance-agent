@@ -19,6 +19,7 @@ from industrial_maintenance_agent.evaluation import (  # noqa: E402
 )
 from industrial_maintenance_agent.repositories import (  # noqa: E402
     EquipmentRepository,
+    MaintenanceHistoryCsvRepository,
     TelemetryCsvRepository,
 )
 
@@ -27,6 +28,7 @@ st.set_page_config(page_title="工业运维 Agent", page_icon="🛠️", layout=
 st.title("🛠️ 多工具调用工业运维 Agent")
 st.caption("设备故障查询 + 维修方案自动生成｜公开数据教学原型")
 
+history_repository = None
 data_source_mode = st.sidebar.radio("遥测数据源", ["项目仿真数据", "上传只读 CSV"])
 if data_source_mode == "上传只读 CSV":
     uploaded_telemetry = st.sidebar.file_uploader(
@@ -35,9 +37,20 @@ if data_source_mode == "上传只读 CSV":
         help="只在当前会话内解析，不写回设备；请勿上传人员、客户或商业敏感信息。",
     )
     st.sidebar.download_button(
-        "下载 CSV 模板",
+        "下载遥测 CSV 模板",
         data=(ROOT / "data" / "sample" / "telemetry_snapshot.csv").read_bytes(),
         file_name="telemetry_snapshot.csv",
+        mime="text/csv",
+    )
+    uploaded_history = st.sidebar.file_uploader(
+        "故障与维修闭环（可选）",
+        type=["csv"],
+        help="独立的只读历史事件源；不提供时沿用遥测快照中的活动告警。",
+    )
+    st.sidebar.download_button(
+        "下载历史 CSV 模板",
+        data=(ROOT / "data" / "sample" / "maintenance_history.csv").read_bytes(),
+        file_name="maintenance_history.csv",
         mime="text/csv",
     )
     if uploaded_telemetry is None:
@@ -50,10 +63,22 @@ if data_source_mode == "上传只读 CSV":
     except ValueError as exc:
         st.error(f"CSV 校验失败：{exc}")
         st.stop()
+    if uploaded_history is not None:
+        try:
+            history_repository = MaintenanceHistoryCsvRepository.from_bytes(
+                uploaded_history.getvalue(), uploaded_history.name
+            )
+        except ValueError as exc:
+            st.error(f"历史 CSV 校验失败：{exc}")
+            st.stop()
 else:
     repository = EquipmentRepository(ROOT / "data" / "sample" / "equipment.json")
 
-orchestrator = MaintenanceOrchestrator.from_project(ROOT, equipment=repository)
+orchestrator = MaintenanceOrchestrator.from_project(
+    ROOT,
+    equipment=repository,
+    history=history_repository,
+)
 sessions = orchestrator.sessions
 equipment = repository.list_equipment()
 source_metadata = repository.metadata
@@ -73,6 +98,10 @@ with st.sidebar:
     st.warning("不连接、不控制任何真实设备")
     if source_metadata.get("kind") == "user_imported_read_only":
         st.info(f"当前数据源：{source_metadata['name']}（只读、未独立核验）")
+        if history_repository is not None:
+            st.info(f"历史数据源：{history_repository.metadata['name']}（只读、未独立核验）")
+        else:
+            st.caption("历史数据源：沿用遥测快照中的活动告警；没有维修闭环记录")
     else:
         st.caption("当前数据源：项目仿真数据")
     if sessions is not None:

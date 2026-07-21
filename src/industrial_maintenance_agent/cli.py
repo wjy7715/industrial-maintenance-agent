@@ -8,7 +8,11 @@ from .agents import MaintenanceOrchestrator
 from .data_import import profile_ai4i
 from .domain import DiagnosisRequest
 from .evaluation import build_shadow_report, run_retrieval_evaluation
-from .repositories import SessionRepository, TelemetryCsvRepository
+from .repositories import (
+    MaintenanceHistoryCsvRepository,
+    SessionRepository,
+    TelemetryCsvRepository,
+)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -18,6 +22,7 @@ def parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--equipment-id", required=True)
     diagnose.add_argument("--symptom", action="append", required=True)
     diagnose.add_argument("--telemetry-csv", help="使用脱敏的只读遥测 CSV 快照")
+    diagnose.add_argument("--history-csv", help="使用脱敏的只读故障与维修闭环 CSV")
     commands.add_parser("evaluate")
     profile = commands.add_parser("profile-ai4i")
     profile.add_argument("--file", default="data/raw/ai4i/ai4i2020.csv")
@@ -37,6 +42,8 @@ def parser() -> argparse.ArgumentParser:
     shadow.add_argument("--limit", type=int, default=100)
     validate_csv = commands.add_parser("validate-telemetry-csv", help="校验只读遥测 CSV")
     validate_csv.add_argument("--file", required=True)
+    validate_history = commands.add_parser("validate-history-csv", help="校验只读故障历史 CSV")
+    validate_history.add_argument("--file", required=True)
     return root
 
 
@@ -45,12 +52,22 @@ def main() -> None:
     project = Path(__file__).resolve().parents[2]
     if args.command == "diagnose":
         equipment = None
+        history = None
         if args.telemetry_csv:
             csv_path = Path(args.telemetry_csv)
             if not csv_path.is_absolute():
                 csv_path = project / csv_path
             equipment = TelemetryCsvRepository(csv_path)
-        plan = MaintenanceOrchestrator.from_project(project, equipment=equipment).diagnose(
+        if args.history_csv:
+            history_path = Path(args.history_csv)
+            if not history_path.is_absolute():
+                history_path = project / history_path
+            history = MaintenanceHistoryCsvRepository(history_path)
+        plan = MaintenanceOrchestrator.from_project(
+            project,
+            equipment=equipment,
+            history=history,
+        ).diagnose(
             DiagnosisRequest(args.equipment_id, tuple(args.symptom))
         )
         result = plan.to_dict()
@@ -66,6 +83,11 @@ def main() -> None:
         if not path.is_absolute():
             path = project / path
         result = TelemetryCsvRepository(path).validation_summary()
+    elif args.command == "validate-history-csv":
+        path = Path(args.file)
+        if not path.is_absolute():
+            path = project / path
+        result = MaintenanceHistoryCsvRepository(path).validation_summary()
     else:
         sessions = SessionRepository(project / "data" / "runtime" / "assistant.db")
         if args.command == "sessions":

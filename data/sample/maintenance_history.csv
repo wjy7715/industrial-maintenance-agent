@@ -1,0 +1,5 @@
+event_id,equipment_id,event_type,event_at,error_code,action,result,confirmed_cause,verified_at
+EVT-001,CSV-PUMP-001,alarm_open,2026-07-20T09:00:00+08:00,VIBRATION_HIGH,,,,
+EVT-002,CSV-PUMP-001,maintenance_closed,2026-07-20T11:00:00+08:00,,检查并重新对中联轴器,复测振动降至正常范围,联轴器对中偏差,2026-07-20T13:00:00+08:00
+EVT-003,CSV-PUMP-001,alarm_close,2026-07-20T13:05:00+08:00,VIBRATION_HIGH,,,,
+EVT-004,CSV-PUMP-001,alarm_open,2026-07-21T14:00:00+08:00,VIBRATION_HIGH,,,,

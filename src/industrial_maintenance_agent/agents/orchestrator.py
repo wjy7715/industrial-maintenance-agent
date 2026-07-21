@@ -6,6 +6,7 @@ from ..domain import DiagnosisRequest, Evidence, MaintenancePlan, ToolTrace
 from ..repositories import (
     EquipmentDataSource,
     EquipmentRepository,
+    HistoryDataSource,
     KnowledgeRepository,
     SessionRepository,
 )
@@ -42,12 +43,15 @@ class MaintenanceOrchestrator:
         cls,
         root: Path,
         equipment: EquipmentDataSource | None = None,
+        history: HistoryDataSource | None = None,
     ) -> "MaintenanceOrchestrator":
         if equipment is None:
             equipment = EquipmentRepository(root / "data" / "sample" / "equipment.json")
+        if history is None:
+            history = equipment
         knowledge = KnowledgeRepository(root / "data" / "knowledge" / "pump_troubleshooting.json")
         return cls(
-            TelemetryTool(equipment), FaultHistoryTool(equipment),
+            TelemetryTool(equipment), FaultHistoryTool(history),
             KnowledgeSearchTool(knowledge), RiskAssessmentTool(),
             sessions=SessionRepository(root / "data" / "runtime" / "assistant.db"),
         )
@@ -99,6 +103,10 @@ class MaintenanceOrchestrator:
             plan.unknowns.append("故障历史查询失败，本草稿未使用历史记录。")
         elif history_result.status == "empty":
             plan.unknowns.append("未找到活动错误或维修历史；这不代表设备从未故障。")
+        else:
+            plan.facts.append(
+                "故障/维修数据源：" + _source_label(history_result, "未命名故障历史数据源")
+            )
         if history["active_errors"]:
             plan.facts.append("活动错误：" + "、".join(history["active_errors"]))
             plan.evidence.append(Evidence(
@@ -108,10 +116,7 @@ class MaintenanceOrchestrator:
         if history["maintenance_history"]:
             plan.evidence.append(Evidence(
                 "maintenance_history",
-                "；".join(
-                    f"{item.get('date', '日期未知')} {item.get('action', '动作未知')}"
-                    for item in history["maintenance_history"]
-                ),
+                "；".join(_maintenance_summary(item) for item in history["maintenance_history"]),
                 _source_label(history_result, "未命名维修历史数据源"),
             ))
 
@@ -169,6 +174,8 @@ class MaintenanceOrchestrator:
             plan.limitations.append("运行数据来自用户导入的只读快照，系统未独立核验其现场真实性。")
         else:
             plan.limitations.append("运行数据源身份未完全验证，不应直接用于现场操作。")
+        if history_result.source.get("kind") == "user_imported_history_read_only":
+            plan.limitations.append("故障与维修闭环来自用户导入的只读记录，系统未独立核验。")
         plan.limitations.append("运行数据与维修知识来源彼此独立，未声称属于同一设备或厂商手册。")
         if not matches:
             plan.limitations.append("知识库没有可靠匹配，系统没有生成猜测性维修措施。")
@@ -215,6 +222,19 @@ def _history_summary(result: ToolResult) -> str:
         return "故障历史查询失败"
     data = result.data or {}
     return f"读取 {len(data.get('active_errors', []))} 个当前错误、{len(data.get('maintenance_history', []))} 条维修历史"
+
+
+def _maintenance_summary(item: dict[str, object]) -> str:
+    parts = [
+        str(item.get("date") or "日期未知"),
+        str(item.get("action") or "动作未知"),
+        "结果=" + str(item.get("result") or "未记录"),
+    ]
+    if item.get("confirmed_cause"):
+        parts.append("确认原因=" + str(item["confirmed_cause"]))
+    if item.get("verified_at"):
+        parts.append("验证时间=" + str(item["verified_at"]))
+    return " ".join(parts)
 
 
 def _risk_summary(result: ToolResult) -> str:

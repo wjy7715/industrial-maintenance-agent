@@ -13,6 +13,12 @@ class EquipmentDataSource(Protocol):
     def list_equipment(self) -> list[dict[str, Any]]: ...
 
 
+class HistoryDataSource(Protocol):
+    metadata: dict[str, Any]
+
+    def get(self, equipment_id: str) -> dict[str, Any] | None: ...
+
+
 class EquipmentRepository:
     def __init__(self, path: Path) -> None:
         with path.open("r", encoding="utf-8") as handle:
