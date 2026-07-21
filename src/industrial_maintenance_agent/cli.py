@@ -7,7 +7,9 @@ from pathlib import Path
 from .agents import MaintenanceOrchestrator
 from .data_import import profile_ai4i
 from .domain import AccessContext, DiagnosisRequest
-from .governance import KnowledgeValidator
+from .governance import (
+    KnowledgeValidator, create_sqlite_backup, restore_sqlite_backup, verify_sqlite_backup,
+)
 from .governance.reviews import ExpertReviewService
 from .evaluation import build_shadow_report, run_blind_evaluation, run_retrieval_evaluation
 from .repositories import (
@@ -64,6 +66,13 @@ def parser() -> argparse.ArgumentParser:
     review.add_argument("--actor-id", default="local-domain-expert")
     review.add_argument("--role", default="domain_expert")
     review.add_argument("--allowed-site", action="append", default=[])
+    backup = commands.add_parser("backup", help="创建带哈希和完整性检查的审计库备份")
+    backup.add_argument("--output-dir", default="backups")
+    verify_backup = commands.add_parser("verify-backup", help="校验备份清单、哈希和 SQLite 完整性")
+    verify_backup.add_argument("--manifest", required=True)
+    restore_backup = commands.add_parser("restore-backup", help="恢复到一个不存在的新数据库文件")
+    restore_backup.add_argument("--manifest", required=True)
+    restore_backup.add_argument("--target", required=True)
     return root
 
 
@@ -125,6 +134,24 @@ def main() -> None:
             path, AccessContext(args.actor_id, args.role, ("*",))
         )
         result = report.__dict__
+    elif args.command == "backup":
+        output = Path(args.output_dir)
+        if not output.is_absolute():
+            output = project / output
+        result = create_sqlite_backup(project / "data/runtime/assistant.db", output)
+    elif args.command == "verify-backup":
+        manifest = Path(args.manifest)
+        if not manifest.is_absolute():
+            manifest = project / manifest
+        result = verify_sqlite_backup(manifest)
+    elif args.command == "restore-backup":
+        manifest = Path(args.manifest)
+        target = Path(args.target)
+        if not manifest.is_absolute():
+            manifest = project / manifest
+        if not target.is_absolute():
+            target = project / target
+        result = restore_sqlite_backup(manifest, target)
     else:
         sessions = SessionRepository(project / "data" / "runtime" / "assistant.db")
         if args.command == "sessions":

@@ -23,6 +23,9 @@ from industrial_maintenance_agent.repositories import (
 )
 from industrial_maintenance_agent.domain import AccessContext, MaintenancePlan
 from industrial_maintenance_agent.governance import KnowledgeValidator
+from industrial_maintenance_agent.governance import (
+    create_sqlite_backup, restore_sqlite_backup, verify_sqlite_backup,
+)
 from industrial_maintenance_agent.governance.reviews import ExpertReviewService
 from industrial_maintenance_agent.safety import (
     MaintenancePlanValidator,
@@ -103,6 +106,33 @@ class RepositoryTests(unittest.TestCase):
 
 
 class AccessAndGovernanceTests(unittest.TestCase):
+    def test_backup_verify_and_safe_restore_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "assistant.db"
+            sessions = SessionRepository(source)
+            agent = MaintenanceOrchestrator.from_project(ROOT)
+            agent.sessions = sessions
+            plan = agent.diagnose(DiagnosisRequest("PUMP-002", ("振动",)))
+            backup = create_sqlite_backup(source, root / "backups")
+            self.assertTrue(verify_sqlite_backup(Path(backup["manifest_path"]))["valid"])
+            restored = root / "restored.db"
+            self.assertTrue(restore_sqlite_backup(Path(backup["manifest_path"]), restored)["restored"])
+            self.assertIsNotNone(SessionRepository(restored).get_session(plan.session_id))
+            with self.assertRaises(FileExistsError):
+                restore_sqlite_backup(Path(backup["manifest_path"]), restored)
+
+    def test_tampered_backup_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "assistant.db"
+            SessionRepository(source)
+            backup = create_sqlite_backup(source, root / "backups")
+            path = Path(backup["backup_path"])
+            path.write_bytes(path.read_bytes() + b"tamper")
+            with self.assertRaisesRegex(ValueError, "哈希不匹配"):
+                verify_sqlite_backup(Path(backup["manifest_path"]))
+
     def test_site_and_role_are_enforced_before_diagnosis(self) -> None:
         agent = MaintenanceOrchestrator.from_project(ROOT)
         plan = agent.diagnose(
