@@ -19,11 +19,23 @@ from industrial_maintenance_agent.repositories import (
     SessionRepository,
     TelemetryCsvRepository,
 )
+from industrial_maintenance_agent.domain import MaintenancePlan
+from industrial_maintenance_agent.safety import (
+    MaintenancePlanValidator,
+    PlanValidationReport,
+    ToolPermissionRegistry,
+)
 from industrial_maintenance_agent.tools import RiskAssessmentTool, TelemetryTool, execute_tool
 from industrial_maintenance_agent.adapters import HermesNarrator
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PUMP_UNITS = {
+    "pressure_bar": "bar",
+    "vibration_mm_s": "mm/s",
+    "temperature_c": "°C",
+    "rotation_rpm": "rpm",
+}
 
 
 class DomainTests(unittest.TestCase):
@@ -186,14 +198,25 @@ class MaintenanceHistoryCsvRepositoryTests(unittest.TestCase):
 
 class RiskTests(unittest.TestCase):
     def test_critical_vibration(self) -> None:
-        result = RiskAssessmentTool().run("centrifugal_pump", {"vibration_mm_s": 8.6})
+        result = RiskAssessmentTool().run(
+            "centrifugal_pump", {"vibration_mm_s": 8.6}, PUMP_UNITS
+        )
         self.assertEqual("critical", result["level"])
+        self.assertIn("mm/s", result["signals"][0])
 
     def test_normal_values(self) -> None:
         result = RiskAssessmentTool().run(
-            "centrifugal_pump", {"vibration_mm_s": 2.0, "temperature_c": 45.0}
+            "centrifugal_pump",
+            {"vibration_mm_s": 2.0, "temperature_c": 45.0},
+            PUMP_UNITS,
         )
         self.assertEqual("low", result["level"])
+
+    def test_wrong_units_are_rejected(self) -> None:
+        wrong = dict(PUMP_UNITS)
+        wrong["vibration_mm_s"] = "inch/s"
+        with self.assertRaisesRegex(ValueError, "单位不匹配"):
+            RiskAssessmentTool().run("centrifugal_pump", {"vibration_mm_s": 2.0}, wrong)
 
 
 class ToolContractTests(unittest.TestCase):
@@ -211,6 +234,136 @@ class ToolContractTests(unittest.TestCase):
         self.assertIn("TimeoutError", result.error)
         self.assertEqual("9.0", result.tool_version)
 
+    def test_unregistered_tool_is_denied_before_execution(self) -> None:
+        calls = {"count": 0}
+
+        class UnknownTool:
+            name = "unknown_external_tool"
+
+            def run(self) -> dict[str, str]:
+                calls["count"] += 1
+                return {"status": "should_not_run"}
+
+        result = execute_tool(
+            UnknownTool(),
+            permission_registry=ToolPermissionRegistry(),
+        )
+        self.assertEqual("failed", result.status)
+        self.assertIn("PermissionError", result.error)
+        self.assertEqual(0, calls["count"])
+
+    def test_write_requires_confirmation_and_device_control_is_denied(self) -> None:
+        registry = ToolPermissionRegistry()
+        with self.assertRaisesRegex(PermissionError, "明确确认"):
+            registry.authorize("write_cmms_work_order")
+        self.assertEqual(
+            "confirm",
+            registry.authorize("write_cmms_work_order", confirmed=True).decision,
+        )
+        with self.assertRaisesRegex(PermissionError, "策略禁止"):
+            registry.authorize("control_plc", confirmed=True)
+
+
+class UnitContractTests(unittest.TestCase):
+    class Repository:
+        metadata = {"kind": "test", "name": "unit-test"}
+
+        def __init__(self, values: dict[str, float]) -> None:
+            self.values = values
+
+        def get(self, equipment_id: str) -> dict[str, object]:
+            return {
+                "equipment_id": equipment_id,
+                "equipment_type": "centrifugal_pump",
+                "equipment_model": "TEST",
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "latest_telemetry": self.values,
+            }
+
+        def list_equipment(self) -> list[dict[str, object]]:
+            return []
+
+    def test_telemetry_tool_returns_canonical_units(self) -> None:
+        values = {
+            "pressure_bar": 2.0,
+            "vibration_mm_s": 3.0,
+            "temperature_c": 50.0,
+            "rotation_rpm": 1450.0,
+        }
+        result = execute_tool(TelemetryTool(self.Repository(values)), "P1")
+        self.assertEqual("success", result.status)
+        self.assertEqual(PUMP_UNITS, result.data["units"])
+
+    def test_missing_and_out_of_range_metrics_fail_closed(self) -> None:
+        missing = {
+            "pressure_bar": 2.0,
+            "vibration_mm_s": 3.0,
+            "temperature_c": 50.0,
+        }
+        result = execute_tool(TelemetryTool(self.Repository(missing)), "P1")
+        self.assertEqual("failed", result.status)
+        self.assertIn("遥测缺少指标", result.error)
+
+        invalid = dict(missing, rotation_rpm=-1.0)
+        result = execute_tool(TelemetryTool(self.Repository(invalid)), "P1")
+        self.assertEqual("failed", result.status)
+        self.assertIn("超出允许范围", result.error)
+
+
+class OutputValidatorTests(unittest.TestCase):
+    def test_action_without_knowledge_evidence_is_rejected(self) -> None:
+        plan = MaintenancePlan(
+            equipment_id="P1",
+            equipment_type="centrifugal_pump",
+            request_id="R1",
+            facts=["fact"],
+            corrective_actions=["更换部件"],
+            safety_warnings=["人工确认"],
+        )
+        report = MaintenancePlanValidator().validate(plan)
+        self.assertFalse(report.valid)
+        self.assertTrue(any("缺少维修知识证据" in item for item in report.errors))
+
+    def test_rejected_output_is_blocked_and_actions_removed(self) -> None:
+        class RejectingValidator:
+            version = "test"
+
+            def validate(self, plan: MaintenancePlan) -> PlanValidationReport:
+                return PlanValidationReport(False, ("测试阻断",))
+
+        base = MaintenanceOrchestrator.from_project(ROOT)
+        agent = MaintenanceOrchestrator(
+            base.telemetry,
+            base.history,
+            base.knowledge,
+            base.risk,
+            validator=RejectingValidator(),
+        )
+        plan = agent.diagnose(DiagnosisRequest("PUMP-002", ("振动",)))
+        self.assertEqual("blocked", plan.status)
+        self.assertEqual("blocked", plan.validation_status)
+        self.assertEqual([], plan.corrective_actions)
+        self.assertTrue(plan.requires_human_confirmation)
+        self.assertEqual("failed", plan.tool_trace[-1].status)
+
+    def test_validator_exception_fails_closed(self) -> None:
+        class BrokenValidator:
+            def validate(self, plan: MaintenancePlan) -> PlanValidationReport:
+                raise RuntimeError("validator unavailable")
+
+        base = MaintenanceOrchestrator.from_project(ROOT)
+        agent = MaintenanceOrchestrator(
+            base.telemetry,
+            base.history,
+            base.knowledge,
+            base.risk,
+            validator=BrokenValidator(),
+        )
+        plan = agent.diagnose(DiagnosisRequest("PUMP-002", ("振动",)))
+        self.assertEqual("blocked", plan.status)
+        self.assertEqual([], plan.corrective_actions)
+        self.assertIn("RuntimeError", plan.validation_errors[0])
+
 
 class OrchestratorTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -220,7 +373,7 @@ class OrchestratorTests(unittest.TestCase):
         plan = self.agent.diagnose(DiagnosisRequest("PUMP-002", ("振动且压力下降",)))
         self.assertEqual("draft", plan.status)
         self.assertTrue(plan.requires_human_confirmation)
-        self.assertEqual(4, len(plan.tool_trace))
+        self.assertEqual(5, len(plan.tool_trace))
         self.assertGreaterEqual(len(plan.evidence), 3)
         self.assertTrue(all(item.source_name for item in plan.evidence))
         self.assertGreaterEqual(len(plan.corrective_actions), 6)
@@ -229,6 +382,9 @@ class OrchestratorTests(unittest.TestCase):
         self.assertTrue(plan.session_id)
         self.assertTrue(plan.facts)
         self.assertTrue(all(item.version for item in plan.tool_trace))
+        self.assertEqual("passed", plan.validation_status)
+        self.assertEqual("success", plan.tool_trace[-1].status)
+        self.assertTrue(any("mm/s" in item for item in plan.facts))
 
     def test_unknown_equipment_explicit(self) -> None:
         with self.assertRaisesRegex(LookupError, "未找到设备"):
@@ -309,6 +465,29 @@ class SessionRepositoryTests(unittest.TestCase):
                 sessions.add_feedback("missing", "liked")
             with self.assertRaises(LookupError):
                 sessions.add_feedback("missing", "effective")
+
+    def test_audit_permission_denial_is_visible_and_prevents_write(self) -> None:
+        class DenyAuditRegistry(ToolPermissionRegistry):
+            def authorize(self, tool_name: str, confirmed: bool = False):
+                if tool_name == "record_audit":
+                    raise PermissionError("audit denied for test")
+                return super().authorize(tool_name, confirmed)
+
+        with tempfile.TemporaryDirectory() as directory:
+            sessions = SessionRepository(Path(directory) / "audit.db")
+            base = MaintenanceOrchestrator.from_project(ROOT)
+            agent = MaintenanceOrchestrator(
+                base.telemetry,
+                base.history,
+                base.knowledge,
+                base.risk,
+                permissions=DenyAuditRegistry(),
+                sessions=sessions,
+            )
+            plan = agent.diagnose(DiagnosisRequest("PUMP-002", ("振动",)))
+            self.assertEqual([], sessions.recent_sessions())
+            self.assertEqual("record_audit", plan.tool_trace[-1].tool)
+            self.assertEqual("failed", plan.tool_trace[-1].status)
 
 
 class ShadowEvaluationTests(unittest.TestCase):

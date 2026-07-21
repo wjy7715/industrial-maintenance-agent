@@ -22,6 +22,7 @@ from industrial_maintenance_agent.repositories import (  # noqa: E402
     MaintenanceHistoryCsvRepository,
     TelemetryCsvRepository,
 )
+from industrial_maintenance_agent.safety import ToolPermissionRegistry  # noqa: E402
 
 
 st.set_page_config(page_title="工业运维 Agent", page_icon="🛠️", layout="wide")
@@ -96,6 +97,9 @@ with st.sidebar:
     st.metric("检索评测 Top-1", f"{report.top1_accuracy:.1%}")
     st.metric("固定评测案例", report.total)
     st.warning("不连接、不控制任何真实设备")
+    with st.expander("工具权限策略"):
+        st.caption("未注册工具默认拒绝；外部写入需确认；设备控制明确禁止。")
+        st.dataframe(ToolPermissionRegistry().report(), width="stretch")
     if source_metadata.get("kind") == "user_imported_read_only":
         st.info(f"当前数据源：{source_metadata['name']}（只读、未独立核验）")
         if history_repository is not None:
@@ -177,11 +181,23 @@ plan = st.session_state.get("last_plan")
 if plan is not None:
     st.divider()
     status_col, risk_col, confirm_col, session_col = st.columns(4)
-    status_label = "等待补充" if plan.status == "awaiting_clarification" else "草稿"
+    status_labels = {
+        "awaiting_clarification": "等待补充",
+        "blocked": "安全阻断",
+        "draft": "草稿",
+    }
+    status_label = status_labels.get(plan.status, plan.status)
     status_col.metric("结果状态", status_label)
     risk_col.metric("风险等级", plan.risk_level.upper())
     confirm_col.metric("人工确认", "必须")
     session_col.metric("会话", plan.session_id[:8])
+
+    if plan.validation_status == "blocked":
+        st.error("输出安全验证未通过，具体维修动作已被阻断。")
+        for item in plan.validation_errors:
+            st.markdown(f"- {item}")
+    else:
+        st.success("输出安全验证通过")
 
     if plan.clarification_questions:
         st.warning("现象信息不足，请补充后重新诊断：")

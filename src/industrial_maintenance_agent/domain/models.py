@@ -64,6 +64,8 @@ class MaintenancePlan:
     conflicts: list[str] = field(default_factory=list)
     clarification_questions: list[str] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
+    validation_status: str = "pending"
+    validation_errors: list[str] = field(default_factory=list)
     requires_human_confirmation: bool = True
 
     def to_dict(self) -> dict[str, Any]:

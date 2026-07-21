@@ -13,6 +13,7 @@ from .repositories import (
     SessionRepository,
     TelemetryCsvRepository,
 )
+from .safety import ToolPermissionRegistry
 
 
 def parser() -> argparse.ArgumentParser:
@@ -44,6 +45,7 @@ def parser() -> argparse.ArgumentParser:
     validate_csv.add_argument("--file", required=True)
     validate_history = commands.add_parser("validate-history-csv", help="校验只读故障历史 CSV")
     validate_history.add_argument("--file", required=True)
+    commands.add_parser("permissions", help="查看确定性工具权限注册表")
     return root
 
 
@@ -88,6 +90,12 @@ def main() -> None:
         if not path.is_absolute():
             path = project / path
         result = MaintenanceHistoryCsvRepository(path).validation_summary()
+    elif args.command == "permissions":
+        result = {
+            "version": ToolPermissionRegistry.version,
+            "default_policy": "deny_unregistered",
+            "permissions": ToolPermissionRegistry().report(),
+        }
     else:
         sessions = SessionRepository(project / "data" / "runtime" / "assistant.db")
         if args.command == "sessions":

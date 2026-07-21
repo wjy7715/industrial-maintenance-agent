@@ -12,6 +12,10 @@ class RunnableTool(Protocol):
     def run(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
+class ToolAuthorizer(Protocol):
+    def authorize(self, tool_name: str, confirmed: bool = False) -> Any: ...
+
+
 @dataclass(frozen=True)
 class ToolResult:
     tool_name: str
@@ -31,10 +35,18 @@ class ToolResult:
         return asdict(self)
 
 
-def execute_tool(tool: RunnableTool, *args: Any, **kwargs: Any) -> ToolResult:
+def execute_tool(
+    tool: RunnableTool,
+    *args: Any,
+    permission_registry: ToolAuthorizer | None = None,
+    confirmed: bool = False,
+    **kwargs: Any,
+) -> ToolResult:
     started = datetime.now(timezone.utc)
     started_clock = perf_counter()
     try:
+        if permission_registry is not None:
+            permission_registry.authorize(tool.name, confirmed=confirmed)
         data = tool.run(*args, **kwargs)
         empty_check = getattr(tool, "is_empty", None)
         is_empty = empty_check(data) if callable(empty_check) else data in (None, [], {})

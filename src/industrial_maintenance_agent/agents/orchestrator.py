@@ -10,7 +10,12 @@ from ..repositories import (
     KnowledgeRepository,
     SessionRepository,
 )
-from ..safety import SafetyPolicy
+from ..safety import (
+    MaintenancePlanValidator,
+    PlanValidationReport,
+    SafetyPolicy,
+    ToolPermissionRegistry,
+)
 from ..tools import (
     FaultHistoryTool,
     KnowledgeSearchTool,
@@ -29,6 +34,8 @@ class MaintenanceOrchestrator:
         knowledge: KnowledgeSearchTool,
         risk: RiskAssessmentTool,
         safety: SafetyPolicy | None = None,
+        permissions: ToolPermissionRegistry | None = None,
+        validator: MaintenancePlanValidator | None = None,
         sessions: SessionRepository | None = None,
     ) -> None:
         self.telemetry = telemetry
@@ -36,6 +43,8 @@ class MaintenanceOrchestrator:
         self.knowledge = knowledge
         self.risk = risk
         self.safety = safety or SafetyPolicy()
+        self.permissions = permissions or ToolPermissionRegistry()
+        self.validator = validator or MaintenancePlanValidator()
         self.sessions = sessions
 
     @classmethod
@@ -57,7 +66,11 @@ class MaintenanceOrchestrator:
         )
 
     def diagnose(self, request: DiagnosisRequest) -> MaintenancePlan:
-        telemetry_result = execute_tool(self.telemetry, request.equipment_id)
+        telemetry_result = execute_tool(
+            self.telemetry,
+            request.equipment_id,
+            permission_registry=self.permissions,
+        )
         if telemetry_result.status == "failed":
             raise LookupError(telemetry_result.error or f"未找到设备：{request.equipment_id}")
         telemetry = telemetry_result.data
@@ -72,10 +85,16 @@ class MaintenanceOrchestrator:
             f"设备 {request.equipment_id}（{telemetry.get('equipment_model') or '型号未提供'}）"
         )
         plan.facts.append(f"遥测数据源：{telemetry_source}")
-        plan.facts.extend(f"{key}={value}" for key, value in telemetry["values"].items())
+        plan.facts.extend(
+            f"{key}={value} {telemetry['units'][key]}"
+            for key, value in telemetry["values"].items()
+        )
         plan.evidence.append(Evidence(
             "telemetry",
-            telemetry["captured_at"] + "：" + "，".join(f"{k}={v}" for k, v in telemetry["values"].items()),
+            telemetry["captured_at"] + "：" + "，".join(
+                f"{key}={value} {telemetry['units'][key]}"
+                for key, value in telemetry["values"].items()
+            ),
             telemetry_source,
         ))
 
@@ -93,10 +112,13 @@ class MaintenanceOrchestrator:
             ]
             plan.limitations.append("现象描述不足，系统尚未生成故障原因或维修动作。")
             plan.safety_warnings = self.safety.apply([], "unknown")
-            self._record_session(request, plan)
-            return plan
+            return self._finalize(request, plan)
 
-        history_result = execute_tool(self.history, request.equipment_id)
+        history_result = execute_tool(
+            self.history,
+            request.equipment_id,
+            permission_registry=self.permissions,
+        )
         plan.tool_trace.append(_trace(history_result, _history_summary(history_result)))
         history = history_result.data or {"active_errors": [], "maintenance_history": []}
         if history_result.status == "failed":
@@ -120,7 +142,13 @@ class MaintenanceOrchestrator:
                 _source_label(history_result, "未命名维修历史数据源"),
             ))
 
-        risk_result = execute_tool(self.risk, telemetry["equipment_type"], telemetry["values"])
+        risk_result = execute_tool(
+            self.risk,
+            telemetry["equipment_type"],
+            telemetry["values"],
+            telemetry["units"],
+            permission_registry=self.permissions,
+        )
         plan.tool_trace.append(_trace(risk_result, _risk_summary(risk_result)))
         risk = risk_result.data or {"level": "unknown", "signals": []}
         plan.risk_level = risk["level"]
@@ -139,6 +167,7 @@ class MaintenanceOrchestrator:
             telemetry["equipment_type"],
             request.symptoms,
             telemetry.get("equipment_model"),
+            permission_registry=self.permissions,
         )
         matches = knowledge_result.data or []
         plan.tool_trace.append(_trace(knowledge_result, _knowledge_summary(knowledge_result)))
@@ -179,6 +208,35 @@ class MaintenanceOrchestrator:
         plan.limitations.append("运行数据与维修知识来源彼此独立，未声称属于同一设备或厂商手册。")
         if not matches:
             plan.limitations.append("知识库没有可靠匹配，系统没有生成猜测性维修措施。")
+        return self._finalize(request, plan)
+
+    def _finalize(self, request: DiagnosisRequest, plan: MaintenancePlan) -> MaintenancePlan:
+        try:
+            report = self.validator.validate(plan)
+        except Exception as exc:
+            report = PlanValidationReport(
+                False,
+                (f"输出验证器异常：{type(exc).__name__}: {exc}",),
+            )
+        plan.validation_status = "passed" if report.valid else "blocked"
+        plan.validation_errors = list(report.errors)
+        plan.tool_trace.append(ToolTrace(
+            "validate_output",
+            "success" if report.valid else "failed",
+            "输出安全验证通过" if report.valid else f"输出安全验证阻断 {len(report.errors)} 项",
+            version=str(getattr(self.validator, "version", "unknown")),
+            error="；".join(report.errors) or None,
+        ))
+        if not report.valid:
+            plan.status = "blocked"
+            plan.requires_human_confirmation = True
+            plan.corrective_actions = []
+            plan.limitations.append("输出安全验证未通过，系统已阻断具体维修动作。")
+            plan.safety_warnings = self.safety.apply(
+                ["请由现场专业人员复核验证错误后重新生成方案。"],
+                plan.risk_level,
+            )
+        plan.limitations.extend(item for item in report.warnings if item not in plan.limitations)
         self._record_session(request, plan)
         return plan
 
@@ -186,6 +244,7 @@ class MaintenanceOrchestrator:
         if self.sessions is None:
             return
         try:
+            self.permissions.authorize("record_audit")
             self.sessions.record_session(request, plan)
         except Exception as exc:
             plan.tool_trace.append(ToolTrace(

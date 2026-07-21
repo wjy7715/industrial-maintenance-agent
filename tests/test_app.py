@@ -28,7 +28,7 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertTrue(metrics["会话"])
         self.assertIn("工具成功率", metrics)
         self.assertIn("证据覆盖率", metrics)
-        self.assertEqual(1, len(app.dataframe))
+        self.assertGreaterEqual(len(app.dataframe), 2)
         feedback_radio = next(item for item in app.radio if item.label == "评价")
         self.assertEqual("说明（可选）", app.text_input[0].label)
         feedback_radio.set_value("部分有效")

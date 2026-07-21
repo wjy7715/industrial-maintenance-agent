@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ..domain import validate_telemetry_values
 from ..repositories import EquipmentDataSource
 
 
 class TelemetryTool:
     name = "query_telemetry"
-    version = "1.2"
+    version = "1.4"
     stale_after_hours = 24
 
     def __init__(self, repository: EquipmentDataSource) -> None:
@@ -18,11 +19,14 @@ class TelemetryTool:
         record = self.repository.get(equipment_id)
         if record is None:
             raise LookupError(f"未找到设备：{equipment_id}")
+        values = record["latest_telemetry"]
+        units = validate_telemetry_values(record["equipment_type"], values)
         return {
             "equipment_type": record["equipment_type"],
             "equipment_model": record.get("equipment_model"),
             "captured_at": record["captured_at"],
-            "values": record["latest_telemetry"],
+            "values": values,
+            "units": units,
         }
 
     def result_metadata(self, data: dict[str, Any]) -> dict[str, Any]:
