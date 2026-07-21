@@ -19,7 +19,9 @@ from industrial_maintenance_agent.repositories import (
     SessionRepository,
     TelemetryCsvRepository,
 )
-from industrial_maintenance_agent.domain import MaintenancePlan
+from industrial_maintenance_agent.domain import AccessContext, MaintenancePlan
+from industrial_maintenance_agent.governance import KnowledgeValidator
+from industrial_maintenance_agent.governance.reviews import ExpertReviewService
 from industrial_maintenance_agent.safety import (
     MaintenancePlanValidator,
     PlanValidationReport,
@@ -64,19 +66,30 @@ class RepositoryTests(unittest.TestCase):
 
     def test_inactive_and_wrong_model_knowledge_is_filtered(self) -> None:
         payload = {
-            "metadata": {"version": "1.0", "default_status": "active"},
+            "metadata": {
+                "version": "1.0", "default_status": "active", "review_status": "approved",
+                "reviewed_by": "expert-a", "approved_by": "admin-b", "reviewed_at": "2026-07-21",
+            },
             "entries": [
                 {
                     "knowledge_id": "INACTIVE",
                     "equipment_type": "centrifugal_pump",
                     "status": "retired",
                     "match_terms": {"振动": 5},
+                    "summary": "test", "possible_causes": ["test"],
+                    "inspection_steps": ["test"], "corrective_actions": ["test"],
+                    "safety_warnings": ["test"],
+                    "source": {"name": "test", "url": "https://example.com", "location": "test"},
                 },
                 {
                     "knowledge_id": "MODEL-B",
                     "equipment_type": "centrifugal_pump",
                     "applicable_models": ["MODEL-B"],
                     "match_terms": {"振动": 5},
+                    "summary": "test", "possible_causes": ["test"],
+                    "inspection_steps": ["test"], "corrective_actions": ["test"],
+                    "safety_warnings": ["test"],
+                    "source": {"name": "test", "url": "https://example.com", "location": "test"},
                 },
             ],
         }
@@ -87,14 +100,66 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual([], repository.search("centrifugal_pump", "振动", equipment_model="MODEL-A"))
 
 
+class AccessAndGovernanceTests(unittest.TestCase):
+    def test_site_and_role_are_enforced_before_diagnosis(self) -> None:
+        agent = MaintenanceOrchestrator.from_project(ROOT)
+        plan = agent.diagnose(
+            DiagnosisRequest("PUMP-001", ("振动",)),
+            AccessContext("tech-1", "technician", ("demo-site",)),
+        )
+        self.assertEqual("demo-site", plan.site_id)
+        self.assertEqual("tech-1", plan.actor_id)
+        for access in (
+            AccessContext("admin-1", "knowledge_admin", ("demo-site",)),
+            AccessContext("tech-2", "technician", ("other-site",)),
+        ):
+            with self.assertRaisesRegex(LookupError, "未找到设备或无权访问"):
+                agent.diagnose(DiagnosisRequest("PUMP-001", ("振动",)), access)
+
+    def test_current_knowledge_package_passes_governance(self) -> None:
+        report = KnowledgeValidator().validate_path(
+            ROOT / "data/knowledge/pump_troubleshooting.json",
+            AccessContext("expert-1", "domain_expert", ("*",)),
+        )
+        self.assertTrue(report.valid)
+        self.assertEqual(6, report.active_entries)
+        self.assertEqual(64, len(report.sha256))
+
+    def test_technician_cannot_validate_knowledge(self) -> None:
+        with self.assertRaises(PermissionError):
+            KnowledgeValidator().validate_path(
+                ROOT / "data/knowledge/pump_troubleshooting.json",
+                AccessContext("tech-1", "technician", ("demo-site",)),
+            )
+
+    def test_expert_review_is_separate_and_audited(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sessions = SessionRepository(Path(directory) / "audit.db")
+            agent = MaintenanceOrchestrator.from_project(ROOT)
+            agent.sessions = sessions
+            plan = agent.diagnose(DiagnosisRequest("PUMP-001", ("振动",)))
+            review_id = ExpertReviewService(sessions).submit(
+                AccessContext("expert-1", "domain_expert", ("demo-site",)),
+                plan.session_id, "approved", "证据与步骤已复核",
+            )
+            detail = sessions.get_session(plan.session_id)
+            self.assertEqual(review_id, detail["expert_reviews"][0]["review_id"])
+            self.assertEqual("expert-1", detail["expert_reviews"][0]["reviewer_id"])
+            with self.assertRaises(PermissionError):
+                ExpertReviewService(sessions).submit(
+                    AccessContext("tech-1", "technician", ("demo-site",)),
+                    plan.session_id, "approved", "越权审核",
+                )
+
+
 class TelemetryCsvRepositoryTests(unittest.TestCase):
     @staticmethod
     def _payload(captured_at: str | None = None) -> bytes:
         captured_at = captured_at or datetime.now(timezone.utc).isoformat()
         return (
-            "equipment_id,equipment_type,equipment_model,captured_at,pressure_bar,"
+            "site_id,equipment_id,equipment_type,equipment_model,captured_at,pressure_bar,"
             "vibration_mm_s,temperature_c,rotation_rpm,active_errors\n"
-            f"FIELD-PUMP-01,centrifugal_pump,MODEL-A,{captured_at},2.6,4.8,61,1450,"
+            f"local-upload,FIELD-PUMP-01,centrifugal_pump,MODEL-A,{captured_at},2.6,4.8,61,1450,"
             "VIBRATION_HIGH\n"
         ).encode("utf-8")
 

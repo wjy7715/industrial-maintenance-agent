@@ -13,6 +13,8 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from industrial_maintenance_agent import DiagnosisRequest, MaintenanceOrchestrator  # noqa: E402
+from industrial_maintenance_agent.domain import AccessContext  # noqa: E402
+from industrial_maintenance_agent.governance.reviews import ExpertReviewService  # noqa: E402
 from industrial_maintenance_agent.evaluation import (  # noqa: E402
     build_shadow_report,
     run_retrieval_evaluation,
@@ -74,6 +76,17 @@ if data_source_mode == "上传只读 CSV":
             st.stop()
 else:
     repository = EquipmentRepository(ROOT / "data" / "sample" / "equipment.json")
+
+role = st.sidebar.selectbox(
+    "本地演示角色",
+    ["technician", "domain_expert", "knowledge_admin", "administrator"],
+)
+st.sidebar.caption("仅用于演示授权逻辑，不等于企业账号登录或真实身份认证。")
+access_context = AccessContext(
+    actor_id=f"local-{role}",
+    role=role,
+    allowed_sites=("demo-site", "local-upload") if role != "administrator" else ("*",),
+)
 
 orchestrator = MaintenanceOrchestrator.from_project(
     ROOT,
@@ -171,8 +184,10 @@ with right:
 
 if submitted:
     try:
-        plan = orchestrator.diagnose(DiagnosisRequest(selected, (symptom,)))
-    except (ValueError, LookupError) as exc:
+        plan = orchestrator.diagnose(
+            DiagnosisRequest(selected, (symptom,)), access=access_context
+        )
+    except (ValueError, LookupError, PermissionError) as exc:
         st.error(str(exc))
     else:
         st.session_state["last_plan"] = plan
@@ -278,6 +293,24 @@ if plan is not None:
                 st.error(str(exc))
             else:
                 st.success(f"反馈已记录（#{feedback_id}），不会自动修改知识库。")
+
+        if role in {"domain_expert", "administrator"}:
+            with st.form("expert_review", clear_on_submit=True):
+                st.subheader("专家审核")
+                review_status = st.selectbox(
+                    "审核结论", ["approved", "needs_revision", "rejected", "unsafe"]
+                )
+                review_conclusion = st.text_input("复核说明（必填）")
+                review_submitted = st.form_submit_button("提交专家审核")
+            if review_submitted:
+                try:
+                    review_id = ExpertReviewService(sessions).submit(
+                        access_context, plan.session_id, review_status, review_conclusion
+                    )
+                except (ValueError, LookupError, PermissionError) as exc:
+                    st.error(str(exc))
+                else:
+                    st.success(f"专家审核已留痕（#{review_id}），与普通反馈分开保存。")
 
     st.caption("；".join(plan.limitations))
 

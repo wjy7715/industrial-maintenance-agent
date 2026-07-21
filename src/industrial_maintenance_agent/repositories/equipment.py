@@ -12,6 +12,8 @@ class EquipmentDataSource(Protocol):
 
     def list_equipment(self) -> list[dict[str, Any]]: ...
 
+    def get_scope(self, equipment_id: str) -> str | None: ...
+
 
 class HistoryDataSource(Protocol):
     metadata: dict[str, Any]
@@ -31,3 +33,7 @@ class EquipmentRepository:
 
     def list_equipment(self) -> list[dict[str, Any]]:
         return list(self._records.values())
+
+    def get_scope(self, equipment_id: str) -> str | None:
+        record = self.get(equipment_id)
+        return str(record.get("site_id")) if record and record.get("site_id") else None

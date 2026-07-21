@@ -48,6 +48,16 @@ class SessionRepository:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(session_id) REFERENCES diagnosis_sessions(session_id)
                 );
+                CREATE TABLE IF NOT EXISTS expert_reviews (
+                    review_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    conclusion TEXT NOT NULL,
+                    reviewer_id TEXT NOT NULL,
+                    reviewer_role TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(session_id) REFERENCES diagnosis_sessions(session_id)
+                );
                 """
             )
             connection.commit()
@@ -135,6 +145,43 @@ class SessionRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def add_expert_review(
+        self,
+        session_id: str,
+        status: str,
+        conclusion: str,
+        reviewer_id: str,
+        reviewer_role: str,
+    ) -> int:
+        with closing(self._connect()) as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM diagnosis_sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            if exists is None:
+                raise LookupError(f"未找到诊断会话：{session_id}")
+            cursor = connection.execute(
+                """
+                INSERT INTO expert_reviews
+                (session_id, status, conclusion, reviewer_id, reviewer_role, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (session_id, status, conclusion.strip(), reviewer_id, reviewer_role,
+                 datetime.now(timezone.utc).isoformat()),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
+
+    def expert_reviews_for_session(self, session_id: str) -> list[dict[str, Any]]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT review_id, status, conclusion, reviewer_id, reviewer_role, created_at
+                FROM expert_reviews WHERE session_id = ? ORDER BY review_id
+                """,
+                (session_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         with closing(self._connect()) as connection:
             row = connection.execute(
@@ -154,4 +201,5 @@ class SessionRepository:
             "request": json.loads(row["request_json"]),
             "plan": json.loads(row["plan_json"]),
             "feedback": self.feedback_for_session(session_id),
+            "expert_reviews": self.expert_reviews_for_session(session_id),
         }

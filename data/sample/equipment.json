@@ -6,6 +6,7 @@
   "equipment": [
     {
       "equipment_id": "PUMP-001",
+      "site_id": "demo-site",
       "equipment_type": "centrifugal_pump",
       "equipment_model": "DEMO-PUMP-A",
       "captured_at": "2026-07-18T09:00:00+08:00",
@@ -15,6 +16,7 @@
     },
     {
       "equipment_id": "PUMP-002",
+      "site_id": "demo-site",
       "equipment_type": "centrifugal_pump",
       "equipment_model": "DEMO-PUMP-A",
       "captured_at": "2026-07-18T09:00:00+08:00",
@@ -24,6 +26,7 @@
     },
     {
       "equipment_id": "PUMP-003",
+      "site_id": "demo-site",
       "equipment_type": "centrifugal_pump",
       "equipment_model": "DEMO-PUMP-B",
       "captured_at": "2026-07-18T09:00:00+08:00",

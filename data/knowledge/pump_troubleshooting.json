@@ -4,6 +4,9 @@
     "default_status": "active",
     "applicable_models": ["DEMO-PUMP-A", "DEMO-PUMP-B"],
     "reviewed_at": "2026-07-18",
+    "review_status": "approved",
+    "reviewed_by": "demo-domain-expert",
+    "approved_by": "demo-knowledge-admin",
     "notice": "公开资料的结构化释义；执行前必须核对具体型号手册。"
   },
   "entries": [

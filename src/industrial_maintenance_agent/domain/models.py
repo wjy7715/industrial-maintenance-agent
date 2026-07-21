@@ -49,6 +49,10 @@ class MaintenancePlan:
     equipment_id: str
     equipment_type: str
     request_id: str = ""
+    site_id: str = ""
+    actor_id: str = ""
+    actor_role: str = ""
+    identity_source: str = "local_demo"
     session_id: str = field(default_factory=lambda: str(uuid4()))
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     status: str = "draft"

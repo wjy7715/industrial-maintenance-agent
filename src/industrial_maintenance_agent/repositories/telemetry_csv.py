@@ -9,6 +9,7 @@ from typing import Any
 
 
 REQUIRED_COLUMNS = {
+    "site_id",
     "equipment_id",
     "equipment_type",
     "captured_at",
@@ -62,10 +63,11 @@ class TelemetryCsvRepository:
             if row_number - 1 > self.max_rows:
                 raise ValueError(f"遥测 CSV 超过 {self.max_rows} 行限制")
             equipment_id = (row.get("equipment_id") or "").strip()
+            site_id = (row.get("site_id") or "").strip()
             equipment_type = (row.get("equipment_type") or "").strip()
             captured_at = (row.get("captured_at") or "").strip()
-            if not equipment_id or not equipment_type:
-                raise ValueError(f"第 {row_number} 行设备编号或类型为空")
+            if not equipment_id or not equipment_type or not site_id:
+                raise ValueError(f"第 {row_number} 行站点、设备编号或类型为空")
             if equipment_id in records:
                 raise ValueError(f"设备编号重复：{equipment_id}")
             try:
@@ -90,6 +92,7 @@ class TelemetryCsvRepository:
             ]
             records[equipment_id] = {
                 "equipment_id": equipment_id,
+                "site_id": site_id,
                 "equipment_type": equipment_type,
                 "equipment_model": (row.get("equipment_model") or "").strip() or None,
                 "captured_at": captured_at,
@@ -113,6 +116,10 @@ class TelemetryCsvRepository:
 
     def list_equipment(self) -> list[dict[str, Any]]:
         return list(self._records.values())
+
+    def get_scope(self, equipment_id: str) -> str | None:
+        record = self.get(equipment_id)
+        return str(record.get("site_id")) if record else None
 
     def validation_summary(self) -> dict[str, Any]:
         timestamps = [item["captured_at"] for item in self._records.values()]

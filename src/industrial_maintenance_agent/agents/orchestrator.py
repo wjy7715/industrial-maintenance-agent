@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..domain import DiagnosisRequest, Evidence, MaintenancePlan, ToolTrace
+from ..domain import AccessContext, DiagnosisRequest, Evidence, MaintenancePlan, ToolTrace
 from ..repositories import (
     EquipmentDataSource,
     EquipmentRepository,
@@ -12,6 +12,7 @@ from ..repositories import (
 )
 from ..safety import (
     MaintenancePlanValidator,
+    AccessPolicy,
     PlanValidationReport,
     SafetyPolicy,
     ToolPermissionRegistry,
@@ -37,6 +38,7 @@ class MaintenanceOrchestrator:
         permissions: ToolPermissionRegistry | None = None,
         validator: MaintenancePlanValidator | None = None,
         sessions: SessionRepository | None = None,
+        access_policy: AccessPolicy | None = None,
     ) -> None:
         self.telemetry = telemetry
         self.history = history
@@ -46,6 +48,7 @@ class MaintenanceOrchestrator:
         self.permissions = permissions or ToolPermissionRegistry()
         self.validator = validator or MaintenancePlanValidator()
         self.sessions = sessions
+        self.access_policy = access_policy or AccessPolicy()
 
     @classmethod
     def from_project(
@@ -65,7 +68,19 @@ class MaintenanceOrchestrator:
             sessions=SessionRepository(root / "data" / "runtime" / "assistant.db"),
         )
 
-    def diagnose(self, request: DiagnosisRequest) -> MaintenancePlan:
+    def diagnose(
+        self,
+        request: DiagnosisRequest,
+        access: AccessContext | None = None,
+    ) -> MaintenancePlan:
+        access = access or AccessContext.local_technician()
+        site_id = self.telemetry.repository.get_scope(request.equipment_id)
+        if site_id is None:
+            raise LookupError("未找到设备或无权访问")
+        try:
+            self.access_policy.authorize(access, "diagnose", site_id)
+        except PermissionError as exc:
+            raise LookupError("未找到设备或无权访问") from exc
         telemetry_result = execute_tool(
             self.telemetry,
             request.equipment_id,
@@ -78,6 +93,10 @@ class MaintenanceOrchestrator:
             equipment_id=request.equipment_id,
             equipment_type=telemetry["equipment_type"],
             request_id=request.request_id,
+            site_id=site_id,
+            actor_id=access.actor_id,
+            actor_role=access.role,
+            identity_source=access.identity_source,
         )
         plan.tool_trace.append(_trace(telemetry_result, f"读取 {len(telemetry['values'])} 个遥测字段"))
         telemetry_source = _source_label(telemetry_result, "未命名遥测数据源")
@@ -85,6 +104,9 @@ class MaintenanceOrchestrator:
             f"设备 {request.equipment_id}（{telemetry.get('equipment_model') or '型号未提供'}）"
         )
         plan.facts.append(f"遥测数据源：{telemetry_source}")
+        plan.facts.append(
+            f"访问身份：{access.actor_id}（{access.role}，{access.identity_source}）｜站点：{site_id}"
+        )
         plan.facts.extend(
             f"{key}={value} {telemetry['units'][key]}"
             for key, value in telemetry["values"].items()

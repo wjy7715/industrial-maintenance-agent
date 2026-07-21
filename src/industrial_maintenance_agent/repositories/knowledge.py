@@ -4,9 +4,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ..governance.knowledge import KnowledgeValidator
+
 
 class KnowledgeRepository:
     def __init__(self, path: Path) -> None:
+        self.validation_report = KnowledgeValidator().validate_path(path)
+        if not self.validation_report.valid:
+            raise ValueError("知识库发布校验失败：" + "；".join(self.validation_report.errors))
         with path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
         self.metadata = payload["metadata"]

@@ -6,7 +6,9 @@ from pathlib import Path
 
 from .agents import MaintenanceOrchestrator
 from .data_import import profile_ai4i
-from .domain import DiagnosisRequest
+from .domain import AccessContext, DiagnosisRequest
+from .governance import KnowledgeValidator
+from .governance.reviews import ExpertReviewService
 from .evaluation import build_shadow_report, run_retrieval_evaluation
 from .repositories import (
     MaintenanceHistoryCsvRepository,
@@ -24,6 +26,9 @@ def parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--symptom", action="append", required=True)
     diagnose.add_argument("--telemetry-csv", help="使用脱敏的只读遥测 CSV 快照")
     diagnose.add_argument("--history-csv", help="使用脱敏的只读故障与维修闭环 CSV")
+    diagnose.add_argument("--actor-id", default="local-technician")
+    diagnose.add_argument("--role", default="technician")
+    diagnose.add_argument("--allowed-site", action="append", default=[])
     commands.add_parser("evaluate")
     profile = commands.add_parser("profile-ai4i")
     profile.add_argument("--file", default="data/raw/ai4i/ai4i2020.csv")
@@ -46,6 +51,17 @@ def parser() -> argparse.ArgumentParser:
     validate_history = commands.add_parser("validate-history-csv", help="校验只读故障历史 CSV")
     validate_history.add_argument("--file", required=True)
     commands.add_parser("permissions", help="查看确定性工具权限注册表")
+    validate_knowledge = commands.add_parser("validate-knowledge", help="校验知识发布包")
+    validate_knowledge.add_argument("--file", default="data/knowledge/pump_troubleshooting.json")
+    validate_knowledge.add_argument("--actor-id", default="local-domain-expert")
+    validate_knowledge.add_argument("--role", default="domain_expert")
+    review = commands.add_parser("review", help="提交专家审核结论")
+    review.add_argument("--session-id", required=True)
+    review.add_argument("--status", required=True, choices=("approved", "needs_revision", "rejected", "unsafe"))
+    review.add_argument("--conclusion", required=True)
+    review.add_argument("--actor-id", default="local-domain-expert")
+    review.add_argument("--role", default="domain_expert")
+    review.add_argument("--allowed-site", action="append", default=[])
     return root
 
 
@@ -70,7 +86,8 @@ def main() -> None:
             equipment=equipment,
             history=history,
         ).diagnose(
-            DiagnosisRequest(args.equipment_id, tuple(args.symptom))
+            DiagnosisRequest(args.equipment_id, tuple(args.symptom)),
+            AccessContext(args.actor_id, args.role, tuple(args.allowed_site or ["demo-site", "local-upload"])),
         )
         result = plan.to_dict()
     elif args.command == "evaluate":
@@ -96,6 +113,14 @@ def main() -> None:
             "default_policy": "deny_unregistered",
             "permissions": ToolPermissionRegistry().report(),
         }
+    elif args.command == "validate-knowledge":
+        path = Path(args.file)
+        if not path.is_absolute():
+            path = project / path
+        report = KnowledgeValidator().validate_path(
+            path, AccessContext(args.actor_id, args.role, ("*",))
+        )
+        result = report.__dict__
     else:
         sessions = SessionRepository(project / "data" / "runtime" / "assistant.db")
         if args.command == "sessions":
@@ -107,6 +132,14 @@ def main() -> None:
         elif args.command == "feedback":
             feedback_id = sessions.add_feedback(args.session_id, args.rating, args.comment)
             result = {"feedback_id": feedback_id, "session_id": args.session_id, "status": "recorded"}
+        elif args.command == "review":
+            access = AccessContext(
+                args.actor_id, args.role, tuple(args.allowed_site or ["demo-site", "local-upload"])
+            )
+            review_id = ExpertReviewService(sessions).submit(
+                access, args.session_id, args.status, args.conclusion
+            )
+            result = {"review_id": review_id, "session_id": args.session_id, "status": args.status}
         else:
             result = build_shadow_report(sessions, args.limit).to_dict()
     print(json.dumps(result, ensure_ascii=False, indent=2))
