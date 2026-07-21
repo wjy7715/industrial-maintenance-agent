@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..domain import DiagnosisRequest, Evidence, MaintenancePlan, ToolTrace
-from ..repositories import EquipmentRepository, KnowledgeRepository, SessionRepository
+from ..repositories import (
+    EquipmentDataSource,
+    EquipmentRepository,
+    KnowledgeRepository,
+    SessionRepository,
+)
 from ..safety import SafetyPolicy
 from ..tools import (
     FaultHistoryTool,
@@ -33,8 +38,13 @@ class MaintenanceOrchestrator:
         self.sessions = sessions
 
     @classmethod
-    def from_project(cls, root: Path) -> "MaintenanceOrchestrator":
-        equipment = EquipmentRepository(root / "data" / "sample" / "equipment.json")
+    def from_project(
+        cls,
+        root: Path,
+        equipment: EquipmentDataSource | None = None,
+    ) -> "MaintenanceOrchestrator":
+        if equipment is None:
+            equipment = EquipmentRepository(root / "data" / "sample" / "equipment.json")
         knowledge = KnowledgeRepository(root / "data" / "knowledge" / "pump_troubleshooting.json")
         return cls(
             TelemetryTool(equipment), FaultHistoryTool(equipment),
@@ -53,18 +63,22 @@ class MaintenanceOrchestrator:
             request_id=request.request_id,
         )
         plan.tool_trace.append(_trace(telemetry_result, f"读取 {len(telemetry['values'])} 个遥测字段"))
+        telemetry_source = _source_label(telemetry_result, "未命名遥测数据源")
         plan.facts.append(
             f"设备 {request.equipment_id}（{telemetry.get('equipment_model') or '型号未提供'}）"
         )
+        plan.facts.append(f"遥测数据源：{telemetry_source}")
         plan.facts.extend(f"{key}={value}" for key, value in telemetry["values"].items())
         plan.evidence.append(Evidence(
             "telemetry",
             telemetry["captured_at"] + "：" + "，".join(f"{k}={v}" for k, v in telemetry["values"].items()),
-            "项目仿真设备数据（非真实现场）",
+            telemetry_source,
         ))
 
         if telemetry_result.quality == "stale":
             plan.unknowns.append("遥测已过期，无法代表设备当前实时状态。")
+        elif telemetry_result.quality == "suspicious":
+            plan.unknowns.append("遥测时间戳晚于系统时间，请先核对设备时钟和时区。")
 
         if _needs_clarification(request):
             plan.status = "awaiting_clarification"
@@ -89,7 +103,7 @@ class MaintenanceOrchestrator:
             plan.facts.append("活动错误：" + "、".join(history["active_errors"]))
             plan.evidence.append(Evidence(
                 "fault_history", "当前错误：" + "、".join(history["active_errors"]),
-                "项目仿真故障记录（非真实现场）",
+                _source_label(history_result, "未命名故障数据源"),
             ))
         if history["maintenance_history"]:
             plan.evidence.append(Evidence(
@@ -98,7 +112,7 @@ class MaintenanceOrchestrator:
                     f"{item.get('date', '日期未知')} {item.get('action', '动作未知')}"
                     for item in history["maintenance_history"]
                 ),
-                "项目仿真维修历史（非真实现场）",
+                _source_label(history_result, "未命名维修历史数据源"),
             ))
 
         risk_result = execute_tool(self.risk, telemetry["equipment_type"], telemetry["values"])
@@ -148,7 +162,14 @@ class MaintenanceOrchestrator:
             plan.corrective_actions = []
             plan.limitations.append("风险达到严重等级，系统已隐藏具体纠正动作；请按现场应急规程升级处理。")
         plan.safety_warnings = self.safety.apply(warnings, plan.risk_level)
-        plan.limitations.append("运行数据与维修知识来自不同公开/仿真来源，未声称属于同一真实设备。")
+        source_kind = telemetry_result.source.get("kind", "unknown")
+        if source_kind == "synthetic_demo":
+            plan.limitations.append("运行数据来自项目仿真设备，不代表真实工业现场。")
+        elif source_kind == "user_imported_read_only":
+            plan.limitations.append("运行数据来自用户导入的只读快照，系统未独立核验其现场真实性。")
+        else:
+            plan.limitations.append("运行数据源身份未完全验证，不应直接用于现场操作。")
+        plan.limitations.append("运行数据与维修知识来源彼此独立，未声称属于同一设备或厂商手册。")
         if not matches:
             plan.limitations.append("知识库没有可靠匹配，系统没有生成猜测性维修措施。")
         self._record_session(request, plan)
@@ -181,6 +202,12 @@ def _trace(result: ToolResult, summary: str) -> ToolTrace:
         result.duration_ms,
         result.error,
     )
+
+
+def _source_label(result: ToolResult, fallback: str) -> str:
+    name = result.source.get("name") if result.source else None
+    kind = result.source.get("kind") if result.source else None
+    return f"{name or fallback}（{kind or 'unknown'}）"
 
 
 def _history_summary(result: ToolResult) -> str:

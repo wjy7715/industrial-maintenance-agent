@@ -8,7 +8,7 @@ from .agents import MaintenanceOrchestrator
 from .data_import import profile_ai4i
 from .domain import DiagnosisRequest
 from .evaluation import build_shadow_report, run_retrieval_evaluation
-from .repositories import SessionRepository
+from .repositories import SessionRepository, TelemetryCsvRepository
 
 
 def parser() -> argparse.ArgumentParser:
@@ -17,6 +17,7 @@ def parser() -> argparse.ArgumentParser:
     diagnose = commands.add_parser("diagnose")
     diagnose.add_argument("--equipment-id", required=True)
     diagnose.add_argument("--symptom", action="append", required=True)
+    diagnose.add_argument("--telemetry-csv", help="使用脱敏的只读遥测 CSV 快照")
     commands.add_parser("evaluate")
     profile = commands.add_parser("profile-ai4i")
     profile.add_argument("--file", default="data/raw/ai4i/ai4i2020.csv")
@@ -34,6 +35,8 @@ def parser() -> argparse.ArgumentParser:
     feedback.add_argument("--comment", default="")
     shadow = commands.add_parser("shadow-report", help="生成本地影子试点评测摘要")
     shadow.add_argument("--limit", type=int, default=100)
+    validate_csv = commands.add_parser("validate-telemetry-csv", help="校验只读遥测 CSV")
+    validate_csv.add_argument("--file", required=True)
     return root
 
 
@@ -41,7 +44,13 @@ def main() -> None:
     args = parser().parse_args()
     project = Path(__file__).resolve().parents[2]
     if args.command == "diagnose":
-        plan = MaintenanceOrchestrator.from_project(project).diagnose(
+        equipment = None
+        if args.telemetry_csv:
+            csv_path = Path(args.telemetry_csv)
+            if not csv_path.is_absolute():
+                csv_path = project / csv_path
+            equipment = TelemetryCsvRepository(csv_path)
+        plan = MaintenanceOrchestrator.from_project(project, equipment=equipment).diagnose(
             DiagnosisRequest(args.equipment_id, tuple(args.symptom))
         )
         result = plan.to_dict()
@@ -52,6 +61,11 @@ def main() -> None:
         if not path.is_absolute():
             path = project / path
         result = profile_ai4i(path)
+    elif args.command == "validate-telemetry-csv":
+        path = Path(args.file)
+        if not path.is_absolute():
+            path = project / path
+        result = TelemetryCsvRepository(path).validation_summary()
     else:
         sessions = SessionRepository(project / "data" / "runtime" / "assistant.db")
         if args.command == "sessions":

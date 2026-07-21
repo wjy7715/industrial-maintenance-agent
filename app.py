@@ -17,17 +17,46 @@ from industrial_maintenance_agent.evaluation import (  # noqa: E402
     build_shadow_report,
     run_retrieval_evaluation,
 )
-from industrial_maintenance_agent.repositories import EquipmentRepository  # noqa: E402
+from industrial_maintenance_agent.repositories import (  # noqa: E402
+    EquipmentRepository,
+    TelemetryCsvRepository,
+)
 
 
 st.set_page_config(page_title="工业运维 Agent", page_icon="🛠️", layout="wide")
 st.title("🛠️ 多工具调用工业运维 Agent")
 st.caption("设备故障查询 + 维修方案自动生成｜公开数据教学原型")
 
-repository = EquipmentRepository(ROOT / "data" / "sample" / "equipment.json")
-orchestrator = MaintenanceOrchestrator.from_project(ROOT)
+data_source_mode = st.sidebar.radio("遥测数据源", ["项目仿真数据", "上传只读 CSV"])
+if data_source_mode == "上传只读 CSV":
+    uploaded_telemetry = st.sidebar.file_uploader(
+        "选择脱敏遥测快照",
+        type=["csv"],
+        help="只在当前会话内解析，不写回设备；请勿上传人员、客户或商业敏感信息。",
+    )
+    st.sidebar.download_button(
+        "下载 CSV 模板",
+        data=(ROOT / "data" / "sample" / "telemetry_snapshot.csv").read_bytes(),
+        file_name="telemetry_snapshot.csv",
+        mime="text/csv",
+    )
+    if uploaded_telemetry is None:
+        st.info("请在左侧上传脱敏遥测 CSV；上传前不会运行诊断。")
+        st.stop()
+    try:
+        repository = TelemetryCsvRepository.from_bytes(
+            uploaded_telemetry.getvalue(), uploaded_telemetry.name
+        )
+    except ValueError as exc:
+        st.error(f"CSV 校验失败：{exc}")
+        st.stop()
+else:
+    repository = EquipmentRepository(ROOT / "data" / "sample" / "equipment.json")
+
+orchestrator = MaintenanceOrchestrator.from_project(ROOT, equipment=repository)
 sessions = orchestrator.sessions
 equipment = repository.list_equipment()
+source_metadata = repository.metadata
 ERROR_LABELS = {
     "VIBRATION_HIGH": "振动过高",
     "DISCHARGE_PRESSURE_LOW": "出口压力偏低",
@@ -42,6 +71,10 @@ with st.sidebar:
     st.metric("检索评测 Top-1", f"{report.top1_accuracy:.1%}")
     st.metric("固定评测案例", report.total)
     st.warning("不连接、不控制任何真实设备")
+    if source_metadata.get("kind") == "user_imported_read_only":
+        st.info(f"当前数据源：{source_metadata['name']}（只读、未独立核验）")
+    else:
+        st.caption("当前数据源：项目仿真数据")
     if sessions is not None:
         recent_sessions = sessions.recent_sessions(limit=20)
         recent_count = len(recent_sessions)
@@ -61,7 +94,7 @@ with left:
     selected = st.selectbox(
         "设备",
         [item["equipment_id"] for item in equipment],
-        format_func=lambda value: f"{value}｜离心泵",
+        format_func=lambda value: value,
     )
     symptom = st.text_area(
         "现象",
@@ -73,7 +106,12 @@ with left:
 
 with right:
     current = next(item for item in equipment if item["equipment_id"] == selected)
-    st.subheader("最新遥测（仿真）")
+    source_title = (
+        "用户导入遥测（只读）"
+        if source_metadata.get("kind") == "user_imported_read_only"
+        else "最新遥测（仿真）"
+    )
+    st.subheader(source_title)
     metrics = st.columns(2)
     values = current["latest_telemetry"]
     metrics[0].metric("出口压力", f"{values['pressure_bar']} bar")
@@ -85,10 +123,18 @@ with right:
             f"{ERROR_LABELS.get(code, '未翻译告警')}（{code}）"
             for code in current["active_errors"]
         ]
-        st.warning("仿真设备活动告警：" + "、".join(translated_errors))
-        st.caption("这是项目示例设备的故障数据，不是网页、电脑或真实设备报错。")
+        prefix = (
+            "导入快照活动告警"
+            if source_metadata.get("kind") == "user_imported_read_only"
+            else "仿真设备活动告警"
+        )
+        st.warning(prefix + "：" + "、".join(translated_errors))
+        if source_metadata.get("kind") == "user_imported_read_only":
+            st.caption("告警来自上传快照，系统未连接设备，也未验证告警是否仍然有效。")
+        else:
+            st.caption("这是项目示例设备的故障数据，不是网页、电脑或真实设备报错。")
     else:
-        st.success("仿真设备当前没有活动告警")
+        st.success("当前快照没有活动告警")
 
 if submitted:
     try:

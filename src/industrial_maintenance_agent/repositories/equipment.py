@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
+
+
+class EquipmentDataSource(Protocol):
+    metadata: dict[str, Any]
+
+    def get(self, equipment_id: str) -> dict[str, Any] | None: ...
+
+    def list_equipment(self) -> list[dict[str, Any]]: ...
 
 
 class EquipmentRepository:

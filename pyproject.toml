@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "industrial-maintenance-agent"
-version = "1.1.0"
+version = "1.2.0"
 description = "多工具调用工业运维Agent：设备故障查询+维修方案自动生成"
 readme = "README.md"
 requires-python = ">=3.11"

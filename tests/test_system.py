@@ -5,6 +5,7 @@ import sys
 import tempfile
 import types
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,8 +16,9 @@ from industrial_maintenance_agent.repositories import (
     EquipmentRepository,
     KnowledgeRepository,
     SessionRepository,
+    TelemetryCsvRepository,
 )
-from industrial_maintenance_agent.tools import RiskAssessmentTool, execute_tool
+from industrial_maintenance_agent.tools import RiskAssessmentTool, TelemetryTool, execute_tool
 from industrial_maintenance_agent.adapters import HermesNarrator
 
 
@@ -70,6 +72,49 @@ class RepositoryTests(unittest.TestCase):
             path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             repository = KnowledgeRepository(path)
             self.assertEqual([], repository.search("centrifugal_pump", "振动", equipment_model="MODEL-A"))
+
+
+class TelemetryCsvRepositoryTests(unittest.TestCase):
+    def _payload(self, captured_at: str | None = None) -> bytes:
+        captured_at = captured_at or datetime.now(timezone.utc).isoformat()
+        return (
+            "equipment_id,equipment_type,equipment_model,captured_at,pressure_bar,"
+            "vibration_mm_s,temperature_c,rotation_rpm,active_errors\n"
+            f"FIELD-PUMP-01,centrifugal_pump,MODEL-A,{captured_at},2.6,4.8,61,1450,"
+            "VIBRATION_HIGH\n"
+        ).encode("utf-8")
+
+    def test_valid_snapshot_is_read_only_and_traceable(self) -> None:
+        repository = TelemetryCsvRepository.from_bytes(self._payload(), "sanitized.csv")
+        summary = repository.validation_summary()
+        self.assertEqual("valid", summary["status"])
+        self.assertFalse(summary["write_back_enabled"])
+        self.assertEqual("user_imported_read_only", repository.metadata["kind"])
+        self.assertEqual(["FIELD-PUMP-01"], summary["equipment_ids"])
+
+    def test_missing_column_and_duplicate_equipment_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "缺少字段"):
+            TelemetryCsvRepository.from_bytes(
+                b"equipment_id,captured_at\nP1,2026-01-01T00:00:00Z\n"
+            )
+        duplicate = self._payload() + self._payload().split(b"\n", 1)[1]
+        with self.assertRaisesRegex(ValueError, "设备编号重复"):
+            TelemetryCsvRepository.from_bytes(duplicate)
+
+    def test_future_timestamp_is_marked_suspicious(self) -> None:
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        repository = TelemetryCsvRepository.from_bytes(self._payload(future))
+        result = execute_tool(TelemetryTool(repository), "FIELD-PUMP-01")
+        self.assertEqual("suspicious", result.quality)
+        self.assertTrue(any("设备时钟" in item for item in result.warnings))
+
+    def test_orchestrator_audits_imported_source_without_claiming_verification(self) -> None:
+        repository = TelemetryCsvRepository.from_bytes(self._payload(), "field-export.csv")
+        agent = MaintenanceOrchestrator.from_project(ROOT, equipment=repository)
+        plan = agent.diagnose(DiagnosisRequest("FIELD-PUMP-01", ("振动",)))
+        telemetry = next(item for item in plan.evidence if item.kind == "telemetry")
+        self.assertIn("field-export.csv", telemetry.source_name)
+        self.assertTrue(any("未独立核验" in item for item in plan.limitations))
 
 
 class RiskTests(unittest.TestCase):

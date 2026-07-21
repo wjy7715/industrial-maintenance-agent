@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..repositories import EquipmentRepository
+from ..repositories import EquipmentDataSource
 
 
 class FaultHistoryTool:
     name = "query_fault_history"
-    version = "1.1"
+    version = "1.2"
 
-    def __init__(self, repository: EquipmentRepository) -> None:
+    def __init__(self, repository: EquipmentDataSource) -> None:
         self.repository = repository
 
     def run(self, equipment_id: str) -> dict[str, Any]:
@@ -22,8 +22,12 @@ class FaultHistoryTool:
         }
 
     def result_metadata(self, data: dict[str, Any]) -> dict[str, Any]:
+        metadata = getattr(self.repository, "metadata", {})
         return {
-            "source": {"kind": "synthetic_demo", "name": "项目仿真故障记录"},
+            "source": {
+                "kind": metadata.get("kind", "unknown"),
+                "name": metadata.get("name") or metadata.get("notice") or "未命名故障数据源",
+            },
             "quality": "good",
         }
 

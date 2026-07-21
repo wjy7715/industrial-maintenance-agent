@@ -1,0 +1,2 @@
+equipment_id,equipment_type,equipment_model,captured_at,pressure_bar,vibration_mm_s,temperature_c,rotation_rpm,active_errors
+CSV-PUMP-001,centrifugal_pump,DEMO-PUMP-A,2026-07-21T14:00:00+08:00,2.4,5.1,62.0,1450,VIBRATION_HIGH
