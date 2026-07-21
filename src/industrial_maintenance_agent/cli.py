@@ -9,7 +9,7 @@ from .data_import import profile_ai4i
 from .domain import AccessContext, DiagnosisRequest
 from .governance import KnowledgeValidator
 from .governance.reviews import ExpertReviewService
-from .evaluation import build_shadow_report, run_retrieval_evaluation
+from .evaluation import build_shadow_report, run_blind_evaluation, run_retrieval_evaluation
 from .repositories import (
     MaintenanceHistoryCsvRepository,
     SessionRepository,
@@ -30,6 +30,8 @@ def parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--role", default="technician")
     diagnose.add_argument("--allowed-site", action="append", default=[])
     commands.add_parser("evaluate")
+    benchmark = commands.add_parser("benchmark", help="运行独立盲测与检索延迟基线")
+    benchmark.add_argument("--repetitions", type=int, default=5)
     profile = commands.add_parser("profile-ai4i")
     profile.add_argument("--file", default="data/raw/ai4i/ai4i2020.csv")
     sessions = commands.add_parser("sessions", help="查看最近本地审计会话")
@@ -92,6 +94,8 @@ def main() -> None:
         result = plan.to_dict()
     elif args.command == "evaluate":
         result = run_retrieval_evaluation(project).to_dict()
+    elif args.command == "benchmark":
+        result = run_blind_evaluation(project, args.repetitions).to_dict()
     elif args.command == "profile-ai4i":
         path = Path(args.file)
         if not path.is_absolute():

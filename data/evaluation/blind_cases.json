@@ -1,0 +1,24 @@
+{
+  "metadata": {
+    "kind": "held_out_acceptance_cases",
+    "version": "1.0",
+    "notice": "与开发回归集分离；用于本地检索验收，不代表真实工业诊断准确率。"
+  },
+  "cases": [
+    {"id":"B001","text":"启动后一直无法输送介质","expected":"KB-PUMP-NO-FLOW"},
+    {"id":"B002","text":"排出口没有流量","expected":"KB-PUMP-NO-FLOW"},
+    {"id":"B003","text":"扬程不足并且压力下降","expected":"KB-PUMP-LOW-FLOW"},
+    {"id":"B004","text":"近期流量下降","expected":"KB-PUMP-LOW-FLOW"},
+    {"id":"B005","text":"机组抖动伴随异响","expected":"KB-PUMP-VIBRATION"},
+    {"id":"B006","text":"泵体晃动得很明显","expected":"KB-PUMP-VIBRATION"},
+    {"id":"B007","text":"轴承位置持续升温","expected":"KB-PUMP-HOT-BEARING"},
+    {"id":"B008","text":"轴承过热并伴随发热","expected":"KB-PUMP-HOT-BEARING"},
+    {"id":"B009","text":"轴封位置漏液","expected":"KB-PUMP-SEAL-LEAK"},
+    {"id":"B010","text":"机械密封持续滴液","expected":"KB-PUMP-SEAL-LEAK"},
+    {"id":"B011","text":"运行电流过大并跳闸","expected":"KB-PUMP-OVERLOAD"},
+    {"id":"B012","text":"最近耗电增加且电机过载","expected":"KB-PUMP-OVERLOAD"},
+    {"id":"B013","text":"控制柜屏幕亮度变化","expected":null},
+    {"id":"B014","text":"厂房照明闪烁","expected":null},
+    {"id":"B015","text":"想查询设备采购价格","expected":null}
+  ]
+}

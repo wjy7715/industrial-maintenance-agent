@@ -11,7 +11,9 @@ from unittest.mock import patch
 
 from industrial_maintenance_agent import DiagnosisRequest, MaintenanceOrchestrator
 from industrial_maintenance_agent.data_import import profile_ai4i
-from industrial_maintenance_agent.evaluation import build_shadow_report, run_retrieval_evaluation
+from industrial_maintenance_agent.evaluation import (
+    build_shadow_report, run_blind_evaluation, run_retrieval_evaluation,
+)
 from industrial_maintenance_agent.repositories import (
     EquipmentRepository,
     KnowledgeRepository,
@@ -177,8 +179,33 @@ class TelemetryCsvRepositoryTests(unittest.TestCase):
                 b"equipment_id,captured_at\nP1,2026-01-01T00:00:00Z\n"
             )
         duplicate = self._payload() + self._payload().split(b"\n", 1)[1]
-        with self.assertRaisesRegex(ValueError, "设备编号重复"):
+        with self.assertRaisesRegex(ValueError, "设备与采集时间重复"):
             TelemetryCsvRepository.from_bytes(duplicate)
+
+    def test_multiple_points_build_trend_and_latest_snapshot(self) -> None:
+        header, row = self._payload().decode("utf-8").splitlines()
+        rows: list[str] = []
+        for hour, vibration in ((10, 3.0), (11, 4.0), (12, 5.0)):
+            parts = row.split(",")
+            parts[4] = f"2026-07-21T{hour:02d}:00:00+08:00"
+            parts[6] = str(vibration)
+            rows.append(",".join(parts))
+        repository = TelemetryCsvRepository.from_bytes(
+            (header + "\n" + "\n".join(rows) + "\n").encode("utf-8")
+        )
+        self.assertEqual(3, repository.validation_summary()["rows"])
+        self.assertEqual("2026-07-21T12:00:00+08:00", repository.get("FIELD-PUMP-01")["captured_at"])
+        trend = repository.trend("FIELD-PUMP-01")
+        self.assertEqual("good", trend["status"])
+        self.assertEqual("rising", trend["metrics"]["vibration_mm_s"]["direction"])
+
+    def test_naive_timestamp_and_inconsistent_scope_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "必须包含时区"):
+            TelemetryCsvRepository.from_bytes(self._payload("2026-07-21T10:00:00"))
+        header, row = self._payload("2026-07-21T10:00:00+08:00").decode("utf-8").splitlines()
+        second = row.replace("local-upload", "other-site").replace("10:00:00", "11:00:00")
+        with self.assertRaisesRegex(ValueError, "站点、类型或型号"):
+            TelemetryCsvRepository.from_bytes((header + "\n" + row + "\n" + second + "\n").encode())
 
     def test_future_timestamp_is_marked_suspicious(self) -> None:
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
@@ -591,6 +618,14 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(30, report.total)
         self.assertEqual(1.0, report.top1_accuracy)
         self.assertEqual(0, report.no_match)
+
+    def test_blind_set_has_negative_cases_and_performance_baseline(self) -> None:
+        report = run_blind_evaluation(ROOT, repetitions=2)
+        self.assertEqual(15, report.total)
+        self.assertEqual(1.0, report.accuracy)
+        self.assertEqual(0, report.false_positive + report.false_negative + report.wrong_match)
+        self.assertGreaterEqual(report.latency_p95_ms, 0.0)
+        self.assertGreaterEqual(report.latency_max_ms, report.latency_p50_ms)
 
 
 class DataImportTests(unittest.TestCase):

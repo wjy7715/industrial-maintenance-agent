@@ -17,6 +17,7 @@ from industrial_maintenance_agent.domain import AccessContext  # noqa: E402
 from industrial_maintenance_agent.governance.reviews import ExpertReviewService  # noqa: E402
 from industrial_maintenance_agent.evaluation import (  # noqa: E402
     build_shadow_report,
+    run_blind_evaluation,
     run_retrieval_evaluation,
 )
 from industrial_maintenance_agent.repositories import (  # noqa: E402
@@ -107,8 +108,11 @@ with st.sidebar:
     st.success("离线诊断核心可用")
     st.info("Hermes 为可选展示适配器，不影响离线功能")
     report = run_retrieval_evaluation(ROOT)
+    blind_report = run_blind_evaluation(ROOT, repetitions=1)
     st.metric("检索评测 Top-1", f"{report.top1_accuracy:.1%}")
     st.metric("固定评测案例", report.total)
+    st.metric("独立盲测", f"{blind_report.accuracy:.1%}（{blind_report.total}例）")
+    st.caption(f"本机检索 P95：{blind_report.latency_p95_ms:.3f} ms；不代表生产性能。")
     st.warning("不连接、不控制任何真实设备")
     with st.expander("工具权限策略"):
         st.caption("未注册工具默认拒绝；外部写入需确认；设备控制明确禁止。")
@@ -181,6 +185,26 @@ with right:
             st.caption("这是项目示例设备的故障数据，不是网页、电脑或真实设备报错。")
     else:
         st.success("当前快照没有活动告警")
+
+    if hasattr(repository, "trend_records"):
+        trend_records = repository.trend_records(selected)
+        trend_summary = repository.trend(selected)
+        with st.expander("遥测趋势与数据质量", expanded=True):
+            st.caption(
+                f"{trend_summary['points']} 个采样点｜质量：{trend_summary['status']}｜"
+                "只展示历史变化，不预测故障或剩余寿命。"
+            )
+            chart_rows = [
+                {"captured_at": item["captured_at"], **item["latest_telemetry"]}
+                for item in trend_records
+            ]
+            st.line_chart(
+                chart_rows,
+                x="captured_at",
+                y=["pressure_bar", "vibration_mm_s", "temperature_c", "rotation_rpm"],
+            )
+            for warning in trend_summary["quality_warnings"]:
+                st.warning(warning)
 
 if submitted:
     try:
