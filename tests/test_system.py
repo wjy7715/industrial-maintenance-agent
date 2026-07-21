@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from industrial_maintenance_agent import DiagnosisRequest, MaintenanceOrchestrator
 from industrial_maintenance_agent.data_import import profile_ai4i
-from industrial_maintenance_agent.evaluation import run_retrieval_evaluation
+from industrial_maintenance_agent.evaluation import build_shadow_report, run_retrieval_evaluation
 from industrial_maintenance_agent.repositories import (
     EquipmentRepository,
     KnowledgeRepository,
@@ -197,6 +197,36 @@ class SessionRepositoryTests(unittest.TestCase):
                 sessions.add_feedback("missing", "liked")
             with self.assertRaises(LookupError):
                 sessions.add_feedback("missing", "effective")
+
+
+class ShadowEvaluationTests(unittest.TestCase):
+    def test_empty_report_is_explicitly_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sessions = SessionRepository(Path(directory) / "audit.db")
+            report = build_shadow_report(sessions)
+            self.assertEqual(0, report.total_sessions)
+            self.assertEqual(0.0, report.tool_success_rate)
+            self.assertIn("不代表真实工厂", report.scope_notice)
+
+    def test_report_calculates_safety_and_traceability_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sessions = SessionRepository(Path(directory) / "audit.db")
+            base = MaintenanceOrchestrator.from_project(ROOT)
+            agent = MaintenanceOrchestrator(
+                base.telemetry, base.history, base.knowledge, base.risk, sessions=sessions
+            )
+            low = agent.diagnose(DiagnosisRequest("PUMP-002", ("压力下降",)))
+            critical = agent.diagnose(DiagnosisRequest("PUMP-003", ("轴承温度持续升高",)))
+            sessions.add_feedback(low.session_id, "dangerous", "人工复核发现风险")
+            report = build_shadow_report(sessions)
+            self.assertEqual(2, report.total_sessions)
+            self.assertEqual(1, report.reviewed_sessions)
+            self.assertEqual(1, report.critical_sessions)
+            self.assertEqual(1.0, report.tool_success_rate)
+            self.assertEqual(1.0, report.evidence_coverage_rate)
+            self.assertEqual(1.0, report.dangerous_feedback_rate)
+            self.assertEqual(0, report.critical_action_violation_count)
+            self.assertEqual([], critical.corrective_actions)
 
 
 class EvaluationTests(unittest.TestCase):

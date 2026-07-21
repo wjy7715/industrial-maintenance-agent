@@ -25,6 +25,8 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual("草稿", metrics["结果状态"])
         self.assertEqual("必须", metrics["人工确认"])
         self.assertTrue(metrics["会话"])
+        self.assertIn("工具成功率", metrics)
+        self.assertIn("证据覆盖率", metrics)
         self.assertEqual(1, len(app.dataframe))
         self.assertEqual("评价", app.radio[0].label)
         self.assertEqual("说明（可选）", app.text_input[0].label)

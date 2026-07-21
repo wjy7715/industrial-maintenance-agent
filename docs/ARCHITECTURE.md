@@ -12,6 +12,8 @@
 
 `DiagnosisRequest` 进入 `MaintenanceOrchestrator` 后，通过统一 `ToolResult` 契约获得遥测、历史、风险和知识结果。每个结果包含 success/empty/failed、版本、耗时、质量、来源与错误。总控将事实、候选原因、未知项和冲突汇总成 `MaintenancePlan`，随后由 `SafetyPolicy` 添加不可绕过的警告。会话写入本地 SQLite 审计库，CLI、网页和 Hermes 只消费同一个结构化结果。
 
+`evaluation/shadow.py` 只读取审计库，计算影子试点指标并输出结构化报告。它不修改诊断计划或知识库，也不把本地样例指标描述为真实工厂准确率。网页看板和 CLI 的 JSON 报告共享同一评测服务。
+
 任一非关键工具失败时，系统保留失败轨迹并降级输出，不把缺失数据伪装成成功。遥测入口失败或设备不存在时停止诊断。知识检索只返回 active 且适用于当前设备型号的内容。
 
 ## 为什么不是简单 RAG

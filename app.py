@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -12,7 +13,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from industrial_maintenance_agent import DiagnosisRequest, MaintenanceOrchestrator  # noqa: E402
-from industrial_maintenance_agent.evaluation import run_retrieval_evaluation  # noqa: E402
+from industrial_maintenance_agent.evaluation import (  # noqa: E402
+    build_shadow_report,
+    run_retrieval_evaluation,
+)
 from industrial_maintenance_agent.repositories import EquipmentRepository  # noqa: E402
 
 
@@ -185,3 +189,23 @@ if plan is not None:
                 st.success(f"反馈已记录（#{feedback_id}），不会自动修改知识库。")
 
     st.caption("；".join(plan.limitations))
+
+if sessions is not None:
+    shadow_report = build_shadow_report(sessions)
+    with st.expander("影子试点评测看板", expanded=False):
+        st.caption(shadow_report.scope_notice)
+        dashboard = st.columns(4)
+        dashboard[0].metric("审计会话", shadow_report.total_sessions)
+        dashboard[1].metric("工具成功率", f"{shadow_report.tool_success_rate:.1%}")
+        dashboard[2].metric("证据覆盖率", f"{shadow_report.evidence_coverage_rate:.1%}")
+        dashboard[3].metric("危险反馈", shadow_report.dangerous_feedback_count)
+        st.write(
+            f"已反馈会话：{shadow_report.reviewed_sessions}｜"
+            f"严重风险越界动作：{shadow_report.critical_action_violation_count}"
+        )
+        st.download_button(
+            "导出评测报告 JSON",
+            data=json.dumps(shadow_report.to_dict(), ensure_ascii=False, indent=2),
+            file_name="shadow_evaluation_report.json",
+            mime="application/json",
+        )

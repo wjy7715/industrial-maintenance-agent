@@ -7,7 +7,7 @@ from pathlib import Path
 from .agents import MaintenanceOrchestrator
 from .data_import import profile_ai4i
 from .domain import DiagnosisRequest
-from .evaluation import run_retrieval_evaluation
+from .evaluation import build_shadow_report, run_retrieval_evaluation
 from .repositories import SessionRepository
 
 
@@ -32,6 +32,8 @@ def parser() -> argparse.ArgumentParser:
         choices=("effective", "partial", "ineffective", "dangerous"),
     )
     feedback.add_argument("--comment", default="")
+    shadow = commands.add_parser("shadow-report", help="生成本地影子试点评测摘要")
+    shadow.add_argument("--limit", type=int, default=100)
     return root
 
 
@@ -58,9 +60,11 @@ def main() -> None:
             result = sessions.get_session(args.session_id)
             if result is None:
                 raise SystemExit(f"未找到诊断会话：{args.session_id}")
-        else:
+        elif args.command == "feedback":
             feedback_id = sessions.add_feedback(args.session_id, args.rating, args.comment)
             result = {"feedback_id": feedback_id, "session_id": args.session_id, "status": "recorded"}
+        else:
+            result = build_shadow_report(sessions, args.limit).to_dict()
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
