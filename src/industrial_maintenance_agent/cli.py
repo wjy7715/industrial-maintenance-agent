@@ -6,8 +6,18 @@ from pathlib import Path
 
 from .agents import MaintenanceOrchestrator
 from .data_import import profile_ai4i
-from .domain import DiagnosisRequest
-from .evaluation import run_retrieval_evaluation
+from .domain import AccessContext, DiagnosisRequest
+from .governance import (
+    KnowledgeValidator, create_sqlite_backup, restore_sqlite_backup, verify_sqlite_backup,
+)
+from .governance.reviews import ExpertReviewService
+from .evaluation import build_shadow_report, run_blind_evaluation, run_retrieval_evaluation
+from .repositories import (
+    MaintenanceHistoryCsvRepository,
+    SessionRepository,
+    TelemetryCsvRepository,
+)
+from .safety import ToolPermissionRegistry
 
 
 def parser() -> argparse.ArgumentParser:
@@ -16,9 +26,53 @@ def parser() -> argparse.ArgumentParser:
     diagnose = commands.add_parser("diagnose")
     diagnose.add_argument("--equipment-id", required=True)
     diagnose.add_argument("--symptom", action="append", required=True)
+    diagnose.add_argument("--telemetry-csv", help="使用脱敏的只读遥测 CSV 快照")
+    diagnose.add_argument("--history-csv", help="使用脱敏的只读故障与维修闭环 CSV")
+    diagnose.add_argument("--actor-id", default="local-technician")
+    diagnose.add_argument("--role", default="technician")
+    diagnose.add_argument("--allowed-site", action="append", default=[])
     commands.add_parser("evaluate")
+    benchmark = commands.add_parser("benchmark", help="运行独立盲测与检索延迟基线")
+    benchmark.add_argument("--repetitions", type=int, default=5)
     profile = commands.add_parser("profile-ai4i")
     profile.add_argument("--file", default="data/raw/ai4i/ai4i2020.csv")
+    sessions = commands.add_parser("sessions", help="查看最近本地审计会话")
+    sessions.add_argument("--limit", type=int, default=20)
+    session = commands.add_parser("session", help="查看单个诊断会话")
+    session.add_argument("--session-id", required=True)
+    feedback = commands.add_parser("feedback", help="为已审计会话记录人工反馈")
+    feedback.add_argument("--session-id", required=True)
+    feedback.add_argument(
+        "--rating",
+        required=True,
+        choices=("effective", "partial", "ineffective", "dangerous"),
+    )
+    feedback.add_argument("--comment", default="")
+    shadow = commands.add_parser("shadow-report", help="生成本地影子试点评测摘要")
+    shadow.add_argument("--limit", type=int, default=100)
+    validate_csv = commands.add_parser("validate-telemetry-csv", help="校验只读遥测 CSV")
+    validate_csv.add_argument("--file", required=True)
+    validate_history = commands.add_parser("validate-history-csv", help="校验只读故障历史 CSV")
+    validate_history.add_argument("--file", required=True)
+    commands.add_parser("permissions", help="查看确定性工具权限注册表")
+    validate_knowledge = commands.add_parser("validate-knowledge", help="校验知识发布包")
+    validate_knowledge.add_argument("--file", default="data/knowledge/pump_troubleshooting.json")
+    validate_knowledge.add_argument("--actor-id", default="local-domain-expert")
+    validate_knowledge.add_argument("--role", default="domain_expert")
+    review = commands.add_parser("review", help="提交专家审核结论")
+    review.add_argument("--session-id", required=True)
+    review.add_argument("--status", required=True, choices=("approved", "needs_revision", "rejected", "unsafe"))
+    review.add_argument("--conclusion", required=True)
+    review.add_argument("--actor-id", default="local-domain-expert")
+    review.add_argument("--role", default="domain_expert")
+    review.add_argument("--allowed-site", action="append", default=[])
+    backup = commands.add_parser("backup", help="创建带哈希和完整性检查的审计库备份")
+    backup.add_argument("--output-dir", default="backups")
+    verify_backup = commands.add_parser("verify-backup", help="校验备份清单、哈希和 SQLite 完整性")
+    verify_backup.add_argument("--manifest", required=True)
+    restore_backup = commands.add_parser("restore-backup", help="恢复到一个不存在的新数据库文件")
+    restore_backup.add_argument("--manifest", required=True)
+    restore_backup.add_argument("--target", required=True)
     return root
 
 
@@ -26,17 +80,99 @@ def main() -> None:
     args = parser().parse_args()
     project = Path(__file__).resolve().parents[2]
     if args.command == "diagnose":
-        plan = MaintenanceOrchestrator.from_project(project).diagnose(
-            DiagnosisRequest(args.equipment_id, tuple(args.symptom))
+        equipment = None
+        history = None
+        if args.telemetry_csv:
+            csv_path = Path(args.telemetry_csv)
+            if not csv_path.is_absolute():
+                csv_path = project / csv_path
+            equipment = TelemetryCsvRepository(csv_path)
+        if args.history_csv:
+            history_path = Path(args.history_csv)
+            if not history_path.is_absolute():
+                history_path = project / history_path
+            history = MaintenanceHistoryCsvRepository(history_path)
+        plan = MaintenanceOrchestrator.from_project(
+            project,
+            equipment=equipment,
+            history=history,
+        ).diagnose(
+            DiagnosisRequest(args.equipment_id, tuple(args.symptom)),
+            AccessContext(args.actor_id, args.role, tuple(args.allowed_site or ["demo-site", "local-upload"])),
         )
         result = plan.to_dict()
     elif args.command == "evaluate":
         result = run_retrieval_evaluation(project).to_dict()
-    else:
+    elif args.command == "benchmark":
+        result = run_blind_evaluation(project, args.repetitions).to_dict()
+    elif args.command == "profile-ai4i":
         path = Path(args.file)
         if not path.is_absolute():
             path = project / path
         result = profile_ai4i(path)
+    elif args.command == "validate-telemetry-csv":
+        path = Path(args.file)
+        if not path.is_absolute():
+            path = project / path
+        result = TelemetryCsvRepository(path).validation_summary()
+    elif args.command == "validate-history-csv":
+        path = Path(args.file)
+        if not path.is_absolute():
+            path = project / path
+        result = MaintenanceHistoryCsvRepository(path).validation_summary()
+    elif args.command == "permissions":
+        result = {
+            "version": ToolPermissionRegistry.version,
+            "default_policy": "deny_unregistered",
+            "permissions": ToolPermissionRegistry().report(),
+        }
+    elif args.command == "validate-knowledge":
+        path = Path(args.file)
+        if not path.is_absolute():
+            path = project / path
+        report = KnowledgeValidator().validate_path(
+            path, AccessContext(args.actor_id, args.role, ("*",))
+        )
+        result = report.__dict__
+    elif args.command == "backup":
+        output = Path(args.output_dir)
+        if not output.is_absolute():
+            output = project / output
+        result = create_sqlite_backup(project / "data/runtime/assistant.db", output)
+    elif args.command == "verify-backup":
+        manifest = Path(args.manifest)
+        if not manifest.is_absolute():
+            manifest = project / manifest
+        result = verify_sqlite_backup(manifest)
+    elif args.command == "restore-backup":
+        manifest = Path(args.manifest)
+        target = Path(args.target)
+        if not manifest.is_absolute():
+            manifest = project / manifest
+        if not target.is_absolute():
+            target = project / target
+        result = restore_sqlite_backup(manifest, target)
+    else:
+        sessions = SessionRepository(project / "data" / "runtime" / "assistant.db")
+        if args.command == "sessions":
+            result = sessions.recent_sessions(args.limit)
+        elif args.command == "session":
+            result = sessions.get_session(args.session_id)
+            if result is None:
+                raise SystemExit(f"未找到诊断会话：{args.session_id}")
+        elif args.command == "feedback":
+            feedback_id = sessions.add_feedback(args.session_id, args.rating, args.comment)
+            result = {"feedback_id": feedback_id, "session_id": args.session_id, "status": "recorded"}
+        elif args.command == "review":
+            access = AccessContext(
+                args.actor_id, args.role, tuple(args.allowed_site or ["demo-site", "local-upload"])
+            )
+            review_id = ExpertReviewService(sessions).submit(
+                access, args.session_id, args.status, args.conclusion
+            )
+            result = {"review_id": review_id, "session_id": args.session_id, "status": args.status}
+        else:
+            result = build_shadow_report(sessions, args.limit).to_dict()
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
